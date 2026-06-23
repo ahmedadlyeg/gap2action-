@@ -654,7 +654,7 @@ export function RecommendationsTab({ event, onNavigateRoadmap }: Recommendations
             <strong>Some recommendations have been converted to roadmap tasks.</strong>{' '}
             Visit the <button
               type="button"
-              onClick={onNavigateRoadmap}
+              onClick={() => onNavigateRoadmap?.()}
               className="underline font-semibold"
             >Roadmap</button> tab to track progress.
           </p>

@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import React from 'react';
 import { TrendingUp, TrendingDown, Minus, CheckCircle2, ArrowRight, CalendarDays, Info } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { comparisonByCurrentEventId } from '@/services/compareMockData';
@@ -308,7 +308,7 @@ export function CompareTab({ event }: CompareTabProps) {
         </p>
 
         <div className="rounded-xl border bg-card divide-y">
-          {data.completedTasks.map((t, i) => (
+          {data.completedTasks.map((t) => (
             <div key={t.id} className="flex items-center gap-4 px-5 py-3.5">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-50 border border-emerald-200">
                 <CheckCircle2 size={14} className="text-emerald-600" />

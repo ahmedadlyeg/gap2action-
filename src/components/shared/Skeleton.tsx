@@ -41,7 +41,7 @@ export function TableRowSkeleton({ cols = 4 }: { cols?: number }) {
 export function SectionBarSkeleton() {
   return (
     <div className="space-y-5">
-      {[80, 60, 45, 70].map((w, i) => (
+      {[80, 60, 45, 70].map((_w, i) => (
         <div key={i} className="flex items-center gap-4">
           <Skeleton className="h-4 w-40 shrink-0" />
           <Skeleton className="h-5 flex-1 rounded-full" />
