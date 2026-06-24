@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   ClipboardList, TrendingUp, TrendingDown, Minus,
   AlertCircle, ArrowRight, Calendar, Users, CheckCircle2,
-  ChevronDown, ChevronUp, Plus, FolderOpen, ShieldCheck,
+  ChevronDown, ChevronUp, Plus, FolderOpen, ShieldCheck, Eye, Pencil,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Badge } from '@/components/ui/badge';
@@ -11,9 +11,15 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import {
-  events, templates, users, categories,
+  events as seedEvents, templates, users, categories,
 } from '@/services/mockData';
+import { getEvents } from '@/services/store';
 import type { MaturityLevel, RespondentStatus } from '@/types';
+
+function allEvents() {
+  const map = new globalThis.Map([...seedEvents, ...getEvents()].map(e => [e.id, e]));
+  return [...map.values()];
+}
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -81,14 +87,15 @@ function AssessorDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const myEvents = events.filter(e =>
-    e.ownerId === user?.id && (e.status === 'Open' || e.status === 'In Progress')
+  const ev = allEvents();
+  const myEvents = ev.filter(e =>
+    e.ownerId === user?.id && (e.status === 'Open' || e.status === 'In Progress' || e.status === 'Draft')
   );
-  const completedEvents = events
+  const completedEvents = ev
     .filter(e => e.ownerId === user?.id && (e.status === 'Completed' || e.status === 'Closed') && e.score !== undefined)
     .slice(0, 3);
 
-  const pendingValidations = events
+  const pendingValidations = ev
     .flatMap(e => e.respondentProgress)
     .filter(p => p.status === 'Submitted').length;
 
@@ -113,7 +120,7 @@ function AssessorDashboard() {
         <SectionHeader
           title="Active Events"
           action={
-            <Button size="sm" onClick={() => navigate('/categories')}>
+            <Button size="sm" onClick={() => navigate('/events/new')}>
               <Plus size={14} className="mr-1.5" /> Create New Event
             </Button>
           }
@@ -198,7 +205,7 @@ function AssessorDashboard() {
                     <span className="text-lg font-bold text-foreground">{event.score}%</span>
                     {event.maturityLevel && <MaturityPill level={event.maturityLevel} />}
                     <Button variant="ghost" size="sm" asChild>
-                      <Link to={`/events/${event.id}/results`}><ArrowRight size={14} /></Link>
+                      <Link to={`/events/${event.id}`}><ArrowRight size={14} /></Link>
                     </Button>
                   </div>
                 </div>
@@ -216,9 +223,9 @@ function AssessorDashboard() {
 function RespondentDashboard() {
   const { user } = useAuth();
   const [showCompleted, setShowCompleted] = useState(false);
-  const today = new Date('2026-06-21');
+  const today = new Date();
 
-  const myEvents = events.filter(e => e.respondentIds.includes(user?.id ?? ''));
+  const myEvents = allEvents().filter(e => e.respondentIds.includes(user?.id ?? ''));
   const activeEvents = myEvents.filter(e =>
     e.status === 'Open' || e.status === 'In Progress' || e.status === 'Scheduled'
   );
@@ -226,7 +233,7 @@ function RespondentDashboard() {
     e.status === 'Completed' || e.status === 'Closed'
   );
 
-  function myProgress(event: typeof events[0]) {
+  function myProgress(event: ReturnType<typeof allEvents>[0]) {
     return event.respondentProgress.find(p => p.userId === user?.id);
   }
 
@@ -300,17 +307,32 @@ function RespondentDashboard() {
                           />
                         </div>
                       )}
-                      <Button
-                        variant={overdue ? 'destructive' : 'default'}
-                        size="sm"
-                        className="w-full"
-                        asChild
-                      >
-                        <Link to={`/events/${event.id}/questionnaire`}>
-                          {progress?.status === 'Not Started' ? 'Start Assessment' : 'Continue'}
-                          <ArrowRight size={13} className="ml-1" />
-                        </Link>
-                      </Button>
+                      {progress?.completionPct === 100 ? (
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" className="flex-1 gap-1.5" asChild>
+                            <Link to={`/events/${event.id}/questionnaire?mode=preview`}>
+                              <Eye size={13} /> Preview
+                            </Link>
+                          </Button>
+                          <Button size="sm" className="flex-1 gap-1.5" asChild>
+                            <Link to={`/events/${event.id}/questionnaire`}>
+                              <Pencil size={13} /> Edit Response
+                            </Link>
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant={overdue ? 'destructive' : 'default'}
+                          size="sm"
+                          className="w-full"
+                          asChild
+                        >
+                          <Link to={`/events/${event.id}/questionnaire`}>
+                            {progress?.status === 'Not Started' ? 'Start Assessment' : 'Continue'}
+                            <ArrowRight size={13} className="ml-1" />
+                          </Link>
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 );
@@ -354,7 +376,7 @@ function RespondentDashboard() {
                           </span>
                         )}
                         <Button variant="ghost" size="sm" asChild>
-                          <Link to={`/events/${event.id}/results`}><ArrowRight size={14} /></Link>
+                          <Link to={`/events/${event.id}`}><ArrowRight size={14} /></Link>
                         </Button>
                       </div>
                     </div>
@@ -379,8 +401,9 @@ function AdminDashboard() {
     assessor: users.filter(u => u.role === 'assessor').length,
     respondent: users.filter(u => u.role === 'respondent').length,
   };
-  const activeEvents = events.filter(e => e.status === 'Open' || e.status === 'In Progress');
-  const completedEvents = events.filter(e => e.score !== undefined);
+  const ev = allEvents();
+  const activeEvents = ev.filter(e => e.status === 'Open' || e.status === 'In Progress');
+  const completedEvents = ev.filter(e => e.score !== undefined);
   const avgScore = completedEvents.length
     ? Math.round(completedEvents.reduce((s, e) => s + (e.score ?? 0), 0) / completedEvents.length)
     : null;
@@ -452,7 +475,7 @@ function AdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {events.map(event => (
+                {allEvents().map(event => (
                   <tr key={event.id} className="hover:bg-muted/30 transition-colors">
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-foreground truncate max-w-[220px]">{event.name}</p>

@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useParams } from 'react-router-dom';
+import { useDirtyState, registerDirtyGuard, unregisterDirtyGuard } from '@/context/DirtyStateContext';
 import {
   DndContext, DragOverlay, closestCenter,
   PointerSensor, useSensor, useSensors,
@@ -12,7 +13,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   ChevronRight, ChevronDown, Plus, Trash2, GripVertical,
-  Save, Zap, ArrowLeft, BarChart2, Info, X, Check, Lock,
+  Save, Zap, ArrowLeft, BarChart2, Info, X, Check, Lock, Eye,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,36 +27,9 @@ import {
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
 import { templates as seedTemplates } from '@/services/mockData';
-import type { TemplateStatus } from '@/types';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type QuestionType = 'single-choice' | 'multi-choice' | 'rating-scale' | 'yes-no' | 'free-text';
-
-interface AnswerOption { id: string; text: string; score: number }
-
-interface BuilderQuestion {
-  id: string;
-  sectionId: string;
-  text: string;
-  guidance: string;
-  type: QuestionType;
-  required: boolean;
-  options: AnswerOption[];
-  minLabel: string;
-  maxLabel: string;
-  ratingScores: number[];
-  yesScore: number;
-  noScore: number;
-}
-
-interface BuilderSection {
-  id: string;
-  name: string;
-  description: string;
-  weight: number;
-  questions: BuilderQuestion[];
-}
+import { getTemplateSections, saveTemplateSections, updateEvent, getTemplateMeta, saveTemplateMeta } from '@/services/store';
+import { useAuth } from '@/context/AuthContext';
+import type { TemplateStatus, QuestionType, AnswerOption, BuilderQuestion, BuilderSection } from '@/types';
 
 interface MaturityRow {
   id: string;
@@ -725,28 +699,49 @@ function ScoringPanel({ maturityLevels, targetScore, locked, onChangeLevel, onCh
 
 export function TemplateBuilder() {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
   const template = seedTemplates.find(t => t.id === id);
 
-  // ── Builder state ──
-  const [name, setName] = useState(template?.name ?? 'Untitled Template');
+  // ── Builder state — seed from store if previously saved, else from mockData ──
+  const _meta = id ? getTemplateMeta(id) : null;
+  const [name, setName] = useState(_meta?.name ?? template?.name ?? 'Untitled Template');
   const [editingName, setEditingName] = useState(false);
-  const [version, setVersion] = useState(template?.version ?? '1.0');
-  const [status, setStatus] = useState<TemplateStatus>(template?.status ?? 'Draft');
-  const [sections, setSections] = useState<BuilderSection[]>(SEED_SECTIONS);
+  const [version, setVersion] = useState(_meta?.version ?? template?.version ?? '1.0');
+  const [status, setStatus] = useState<TemplateStatus>(_meta?.status ?? template?.status ?? 'Draft');
+  const [sections, setSections] = useState<BuilderSection[]>(() => {
+    if (!id) return SEED_SECTIONS;
+    const stored = getTemplateSections(id);
+    if (stored) return stored;
+    saveTemplateSections(id, SEED_SECTIONS);
+    return SEED_SECTIONS;
+  });
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['sec1', 'sec2']));
-  const [maturityLevels, setMaturityLevels] = useState<MaturityRow[]>(DEFAULT_MATURITY);
-  const [targetScore, setTargetScore] = useState(70);
+  const [maturityLevels, setMaturityLevels] = useState<MaturityRow[]>(
+    (_meta?.maturityLevels as MaturityRow[] | undefined) ?? DEFAULT_MATURITY
+  );
+  const [targetScore, setTargetScore] = useState(_meta?.targetScore ?? 70);
   const [selection, setSelection] = useState<Selection>({ kind: 'scoring' });
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  // Refs always hold latest values — guards and save callbacks read these
+  const isDirtyRef = useRef(false);
+  const sectionsRef = useRef(sections);
+  const nameRef = useRef(name);
+  const versionRef = useRef(version);
+  const statusRef = useRef(status);
+  const maturityLevelsRef = useRef(maturityLevels);
+  const targetScoreRef = useRef(targetScore);
 
   // ── Dialog ──
   const [activateOpen, setActivateOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // ── DnD ──
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const locked = status === 'Active' || status === 'Archived';
+  const locked = status === 'Active' || status === 'Archived' || user?.role !== 'admin';
+
 
   // ── Callbacks ──
   const toggleExpanded = useCallback((sId: string) => {
@@ -764,16 +759,19 @@ export function TemplateBuilder() {
     };
     setSections(prev => [...prev, newSec]);
     setExpandedSections(prev => new Set([...prev, newSec.id]));
+    markDirty();
     setSelection({ kind: 'section', sectionId: newSec.id });
   };
 
   const deleteSection = (sId: string) => {
     setSections(prev => prev.filter(s => s.id !== sId));
     setSelection({ kind: 'scoring' });
+    markDirty();
   };
 
   const updateSection = (sId: string, patch: Partial<BuilderSection>) => {
     setSections(prev => prev.map(s => s.id === sId ? { ...s, ...patch } : s));
+    markDirty();
   };
 
   const addQuestion = (sId: string) => {
@@ -781,6 +779,7 @@ export function TemplateBuilder() {
     setSections(prev => prev.map(s => s.id === sId ? { ...s, questions: [...s.questions, q] } : s));
     setExpandedSections(prev => new Set([...prev, sId]));
     setSelection({ kind: 'question', sectionId: sId, questionId: q.id });
+    markDirty();
   };
 
   const deleteQuestion = (sId: string, qId: string) => {
@@ -788,6 +787,7 @@ export function TemplateBuilder() {
       s.id === sId ? { ...s, questions: s.questions.filter(q => q.id !== qId) } : s
     ));
     setSelection({ kind: 'section', sectionId: sId });
+    markDirty();
   };
 
   const updateQuestion = (sId: string, qId: string, patch: Partial<BuilderQuestion>) => {
@@ -796,20 +796,63 @@ export function TemplateBuilder() {
         ? { ...s, questions: s.questions.map(q => q.id === qId ? { ...q, ...patch } : q) }
         : s
     ));
+    markDirty();
   };
 
-  const handleSaveDraft = () => {
+  // Keep refs in sync with latest state on every render
+  sectionsRef.current = sections;
+  isDirtyRef.current = isDirty;
+  nameRef.current = name;
+  versionRef.current = version;
+  statusRef.current = status;
+  maturityLevelsRef.current = maturityLevels;
+  targetScoreRef.current = targetScore;
+
+  const markDirty = useCallback(() => {
+    isDirtyRef.current = true;
+    setIsDirty(true);
+  }, []);
+
+  // Stable save — reads all refs so always persists the latest values
+  const handleSaveDraft = useCallback(() => {
+    if (id) {
+      saveTemplateSections(id, sectionsRef.current);
+      saveTemplateMeta(id, {
+        name: nameRef.current,
+        version: versionRef.current,
+        status: statusRef.current,
+        maturityLevels: maturityLevelsRef.current,
+        targetScore: targetScoreRef.current,
+      });
+    }
+    isDirtyRef.current = false;
+    setIsDirty(false);
     setSavedAt(Date.now());
     setTimeout(() => setSavedAt(null), 2000);
-  };
+  }, [id]);
+
+  const { requestNavigation } = useDirtyState();
+
+  // Register synchronously on every render — module-level singleton, no effect delays
+  if (!locked) {
+    registerDirtyGuard(() => isDirtyRef.current, handleSaveDraft);
+  } else {
+    unregisterDirtyGuard();
+  }
+
+  // Clean up when this builder unmounts
+  useEffect(() => () => unregisterDirtyGuard(), []);
 
   const handleActivateConfirm = () => {
     setStatus('Active');
-    // Bump patch version on activate
     const parts = version.split('.').map(Number);
     parts[parts.length - 1] = (parts[parts.length - 1] ?? 0) + 1;
     setVersion(parts.join('.'));
     setActivateOpen(false);
+    if (id) {
+      saveTemplateSections(id, sections);
+      updateEvent(id, { status: 'Open' });
+    }
   };
 
   // ── DnD handlers ──
@@ -841,6 +884,7 @@ export function TemplateBuilder() {
         return { ...s, questions: arrayMove(s.questions, oldIdx, newIdx) };
       }));
     }
+    markDirty();
   };
 
   // ── Derive selected item ──
@@ -858,8 +902,8 @@ export function TemplateBuilder() {
     return (
       <div className="p-8 text-center text-muted-foreground">
         <p>Template not found.</p>
-        <Button variant="outline" size="sm" className="mt-4" asChild>
-          <Link to="/categories">← Back to Categories</Link>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => requestNavigation('/categories')}>
+          ← Back to Categories
         </Button>
       </div>
     );
@@ -874,8 +918,8 @@ export function TemplateBuilder() {
           <div className="flex items-center gap-3 min-w-0">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
-                  <Link to="/categories"><ArrowLeft size={15} /></Link>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => requestNavigation('/categories')}>
+                  <ArrowLeft size={15} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Back to Categories</TooltipContent>
@@ -886,7 +930,7 @@ export function TemplateBuilder() {
               <Input
                 autoFocus
                 value={name}
-                onChange={e => setName(e.target.value)}
+                onChange={e => { setName(e.target.value); markDirty(); }}
                 onBlur={() => setEditingName(false)}
                 onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingName(false); }}
                 className="h-7 text-sm font-semibold w-64"
@@ -924,6 +968,10 @@ export function TemplateBuilder() {
                 <Check size={11} /> Saved
               </span>
             )}
+
+            <Button variant="outline" size="sm" onClick={() => setPreviewOpen(true)}>
+              <Eye size={13} className="mr-1.5" /> Preview as Respondent
+            </Button>
 
             {!locked && (
               <>
@@ -1021,10 +1069,11 @@ export function TemplateBuilder() {
                   maturityLevels={maturityLevels}
                   targetScore={targetScore}
                   locked={locked}
-                  onChangeLevel={(id, patch) =>
-                    setMaturityLevels(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r))
-                  }
-                  onChangeTarget={setTargetScore}
+                  onChangeLevel={(id, patch) => {
+                    setMaturityLevels(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+                    markDirty();
+                  }}
+                  onChangeTarget={v => { setTargetScore(v); markDirty(); }}
                 />
               )}
 
@@ -1055,6 +1104,140 @@ export function TemplateBuilder() {
             </div>
           </main>
         </div>
+
+        {/* ── Preview Dialog ── */}
+        <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+          <DialogContent className="max-w-3xl h-[90vh] flex flex-col p-0 gap-0">
+            <DialogTitle className="sr-only">Preview as Respondent</DialogTitle>
+            {/* Banner */}
+            <div className="flex items-center justify-between px-5 py-3 bg-amber-50 border-b border-amber-200 shrink-0">
+              <div className="flex items-center gap-2 text-amber-700 text-xs font-semibold uppercase tracking-wide">
+                <Eye size={14} />
+                Preview Mode — answers are not saved
+              </div>
+              <DialogClose asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-700 hover:bg-amber-100">
+                  <X size={14} />
+                </Button>
+              </DialogClose>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="flex flex-1 min-h-0 overflow-hidden">
+              {/* Section sidebar */}
+              <aside className="w-52 shrink-0 border-r bg-muted/20 overflow-y-auto py-3">
+                <p className="px-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Sections</p>
+                {sections.map((sec, si) => (
+                  <div key={sec.id} className="px-3 py-1.5">
+                    <p className="text-xs font-medium text-foreground truncate">{si + 1}. {sec.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{sec.questions.length} question{sec.questions.length !== 1 ? 's' : ''}</p>
+                  </div>
+                ))}
+              </aside>
+
+              {/* Questions scroll area */}
+              <div className="flex-1 overflow-y-auto px-8 py-6 space-y-10">
+                {sections.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-20">No sections yet. Add sections in the builder.</p>
+                )}
+                {sections.map((sec, si) => (
+                  <div key={sec.id} className="space-y-6">
+                    <div className="border-b pb-3">
+                      <p className="text-xs text-muted-foreground mb-0.5">Section {si + 1} of {sections.length}</p>
+                      <h2 className="text-lg font-bold text-foreground">{sec.name}</h2>
+                      {sec.description && <p className="text-sm text-muted-foreground mt-1">{sec.description}</p>}
+                    </div>
+
+                    {sec.questions.map((q, qi) => (
+                      <div key={q.id} className="rounded-xl border bg-card p-5 space-y-4">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground font-mono mb-1">Question {qi + 1} of {sec.questions.length}</p>
+                          <p className="text-sm font-semibold text-foreground leading-relaxed">
+                            {q.text || <span className="text-muted-foreground italic">Untitled question</span>}
+                            {q.required && <span className="text-destructive ml-1">*</span>}
+                          </p>
+                          {q.guidance && (
+                            <details className="mt-2">
+                              <summary className="text-xs text-primary cursor-pointer flex items-center gap-1">
+                                <Info size={11} /> Guidance notes
+                              </summary>
+                              <p className="text-xs text-muted-foreground mt-1.5 pl-4 border-l-2 border-muted">{q.guidance}</p>
+                            </details>
+                          )}
+                        </div>
+
+                        {/* Single choice */}
+                        {q.type === 'single-choice' && (
+                          <div className="space-y-2">
+                            {q.options.map(opt => (
+                              <label key={opt.id} className="flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
+                                <input type="radio" name={`prev-${q.id}`} className="accent-primary" />
+                                <span className="text-sm text-foreground">{opt.text || <span className="text-muted-foreground italic">Option</span>}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Multi choice */}
+                        {q.type === 'multi-choice' && (
+                          <div className="space-y-2">
+                            {q.options.map(opt => (
+                              <label key={opt.id} className="flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
+                                <input type="checkbox" className="accent-primary rounded" />
+                                <span className="text-sm text-foreground">{opt.text || <span className="text-muted-foreground italic">Option</span>}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Rating scale */}
+                        {q.type === 'rating-scale' && (
+                          <div className="space-y-2">
+                            <div className="flex gap-2">
+                              {(q.ratingScores ?? [1,2,3,4,5]).map(val => (
+                                <label key={val} className="flex flex-col items-center gap-1 cursor-pointer">
+                                  <input type="radio" name={`prev-${q.id}`} className="accent-primary" />
+                                  <span className="text-xs font-semibold text-foreground">{val}</span>
+                                </label>
+                              ))}
+                            </div>
+                            {(q.minLabel || q.maxLabel) && (
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>{q.minLabel}</span>
+                                <span>{q.maxLabel}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Yes / No */}
+                        {q.type === 'yes-no' && (
+                          <div className="flex gap-3">
+                            {['Yes', 'No'].map(val => (
+                              <label key={val} className="flex items-center gap-2 rounded-lg border px-5 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors">
+                                <input type="radio" name={`prev-${q.id}`} className="accent-primary" />
+                                <span className="text-sm font-medium text-foreground">{val}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Free text */}
+                        {q.type === 'free-text' && (
+                          <textarea
+                            className="w-full rounded-lg border bg-background px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            rows={4}
+                            placeholder="Enter your response here…"
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* ── Activate Confirmation Dialog ── */}
         <Dialog open={activateOpen} onOpenChange={setActivateOpen}>

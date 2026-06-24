@@ -1,6 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider } from '@/context/AuthContext';
 import { ToastProvider } from '@/context/ToastContext';
+import { DirtyStateProvider } from '@/context/DirtyStateContext';
 import { ToastRenderer } from '@/components/shared/Toast';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -21,10 +22,16 @@ import { Roadmap } from '@/pages/Roadmap';
 import { Compare } from '@/pages/Compare';
 import { Reports } from '@/pages/Reports';
 
+function KeyedTemplateBuilder() {
+  const { id } = useParams();
+  return <TemplateBuilder key={id} />;
+}
+
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/gap2action-">
       <AuthProvider>
+        <DirtyStateProvider>
         <ToastProvider>
           <ToastRenderer />
           <ErrorBoundary label="Application">
@@ -42,7 +49,7 @@ function App() {
                   <Route index element={<Dashboard />} />
                   <Route path="categories" element={<Categories />} />
                   <Route path="categories/:id/templates" element={<TemplateList />} />
-                  <Route path="templates/:id/builder" element={<TemplateBuilder />} />
+                  <Route path="templates/:id/builder" element={<KeyedTemplateBuilder />} />
                   <Route path="events/new" element={<EventCreate />} />
                   <Route path="events/:id" element={<EventDashboard />} />
                   <Route path="events/:id/results" element={<Results />} />
@@ -63,6 +70,7 @@ function App() {
             </Routes>
           </ErrorBoundary>
         </ToastProvider>
+        </DirtyStateProvider>
       </AuthProvider>
     </BrowserRouter>
   );

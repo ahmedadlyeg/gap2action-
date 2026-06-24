@@ -1,45 +1,46 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
-
 @plugin "tailwindcss-animate";
 
 @theme {
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-display: 'Inter', system-ui, sans-serif;
-  --radius: 0.5rem;
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --radius: 0.75rem;
 
-  /* Brand palette */
-  --color-primary: hsl(221 83% 53%);
-  --color-primary-foreground: hsl(210 40% 98%);
+  /* ── Brand palette (from logo) ─────────────────────────── */
+  /* Orange: #E8941A  |  Blue: #3856D4  |  Green: #4DB88A   */
 
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(222 47% 11%);
+  --color-primary: hsl(231 64% 52%);
+  --color-primary-foreground: hsl(0 0% 100%);
 
-  --color-muted: hsl(210 40% 96%);
-  --color-muted-foreground: hsl(215 16% 47%);
+  --color-background: hsl(226 55% 97%);
+  --color-foreground: hsl(224 65% 16%);
 
-  --color-border: hsl(214 32% 91%);
-  --color-input: hsl(214 32% 91%);
-  --color-ring: hsl(221 83% 53%);
+  --color-muted: hsl(220 38% 92%);
+  --color-muted-foreground: hsl(220 18% 50%);
 
-  --color-secondary: hsl(210 40% 96%);
-  --color-secondary-foreground: hsl(222 47% 11%);
+  --color-border: hsl(220 32% 88%);
+  --color-input: hsl(220 32% 88%);
+  --color-ring: hsl(231 64% 52%);
 
-  --color-accent: hsl(210 40% 96%);
-  --color-accent-foreground: hsl(222 47% 11%);
+  --color-secondary: hsl(220 38% 92%);
+  --color-secondary-foreground: hsl(224 65% 16%);
 
-  --color-destructive: hsl(0 84% 60%);
-  --color-destructive-foreground: hsl(210 40% 98%);
+  --color-accent: hsl(220 38% 92%);
+  --color-accent-foreground: hsl(224 65% 16%);
+
+  --color-destructive: hsl(0 84% 58%);
+  --color-destructive-foreground: hsl(0 0% 100%);
 
   --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(222 47% 11%);
+  --color-card-foreground: hsl(224 65% 16%);
 
   /* Sidebar */
-  --color-sidebar: hsl(222 47% 7%);
-  --color-sidebar-foreground: hsl(210 40% 94%);
-  --color-sidebar-muted: hsl(215 20% 45%);
-  --color-sidebar-accent: hsl(221 83% 53%);
-  --color-sidebar-border: hsl(217 33% 17%);
+  --color-sidebar: hsl(224 58% 8%);
+  --color-sidebar-foreground: hsl(210 40% 95%);
+  --color-sidebar-muted: hsl(219 22% 44%);
+  --color-sidebar-accent: hsl(231 75% 68%);
+  --color-sidebar-border: hsl(222 48% 13%);
 }
 
 @layer base {
@@ -49,5 +50,65 @@
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  /* ── 3-D icon badge ──────────────────────────────────────── */
+  .icon-3d {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 11px;
+    flex-shrink: 0;
+  }
+  .icon-3d-blue {
+    background: linear-gradient(145deg, #5B78E8 0%, #2D49C8 100%);
+    box-shadow: 0 4px 14px rgba(56,86,212,.42), 0 1px 3px rgba(0,0,0,.12),
+                inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  .icon-3d-orange {
+    background: linear-gradient(145deg, #F5B942 0%, #D97810 100%);
+    box-shadow: 0 4px 14px rgba(232,148,26,.42), 0 1px 3px rgba(0,0,0,.12),
+                inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  .icon-3d-green {
+    background: linear-gradient(145deg, #5DD49F 0%, #35A478 100%);
+    box-shadow: 0 4px 14px rgba(77,184,138,.42), 0 1px 3px rgba(0,0,0,.12),
+                inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  .icon-3d-purple {
+    background: linear-gradient(145deg, #A78BFA 0%, #7C3AED 100%);
+    box-shadow: 0 4px 14px rgba(124,58,237,.42), 0 1px 3px rgba(0,0,0,.12),
+                inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  .icon-3d-red {
+    background: linear-gradient(145deg, #F87171 0%, #DC2626 100%);
+    box-shadow: 0 4px 14px rgba(220,38,38,.42), 0 1px 3px rgba(0,0,0,.12),
+                inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  .icon-3d-teal {
+    background: linear-gradient(145deg, #2DD4BF 0%, #0F766E 100%);
+    box-shadow: 0 4px 14px rgba(20,184,166,.42), 0 1px 3px rgba(0,0,0,.12),
+                inset 0 1px 0 rgba(255,255,255,.22);
+  }
+
+  /* ── Gradient text ───────────────────────────────────────── */
+  .text-gradient-brand {
+    background: linear-gradient(135deg, #3856D4 0%, #E8941A 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ── Glassy card panel ───────────────────────────────────── */
+  .glass-panel {
+    background: rgba(255,255,255,.7);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,.55);
   }
 }
