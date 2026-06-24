@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { ArrowLeft, Users, Search, X, Check, Send, UserCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ import {
 import {
   users, templates, departments, userGroups,
 } from '@/services/mockData';
+import { saveEvent } from '@/services/store';
 import type { AssessmentEvent, MaturityLevel, EventStatus } from '@/types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -73,6 +75,7 @@ function CheckItem({
 
 export function EventCreate() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const preselectedTemplateId = searchParams.get('templateId') ?? '';
 
@@ -90,9 +93,10 @@ export function EventCreate() {
   // Respondent selection
   const [respTab, setRespTab] = useState('users');
   const [search, setSearch] = useState('');
-  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
-  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
-  const [selectedDeptNames, setSelectedDeptNames] = useState<Set<string>>(new Set());
+  const [directIds, setDirectIds] = useState<Set<string>>(new Set());
+  const [groupIds, setGroupIds] = useState<Set<string>>(new Set());
+  const [deptIds, setDeptIds] = useState<Set<string>>(new Set());
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
 
   const { toast } = useToast();
 
@@ -105,19 +109,17 @@ export function EventCreate() {
     setErrors(e => ({ ...e, [k]: undefined }));
   };
 
-  // Resolve unique respondent IDs across all selection methods
-  const resolvedUserIds = useMemo(() => {
-    const ids = new Set(selectedUserIds);
-    selectedGroupIds.forEach(gId => {
-      userGroups.find(g => g.id === gId)?.memberIds.forEach(uid => ids.add(uid));
-    });
-    selectedDeptNames.forEach(dName => {
-      activeUsers.filter(u => u.department === dName).forEach(u => ids.add(u.id));
-    });
-    return ids;
-  }, [selectedUserIds, selectedGroupIds, selectedDeptNames]);
+  // Resolve unique respondent IDs — direct + group + dept members, minus exclusions
+  const resolvedIds = useMemo(() => {
+    const ids = new Set<string>();
+    directIds.forEach(id => ids.add(id));
+    userGroups.filter(g => groupIds.has(g.id)).forEach(g => g.memberIds.forEach(id => ids.add(id)));
+    activeUsers.filter(u => u.department && deptIds.has(u.department)).forEach(u => ids.add(u.id));
+    excludedIds.forEach(id => ids.delete(id));
+    return Array.from(ids);
+  }, [directIds, groupIds, deptIds, excludedIds]);
 
-  const resolvedUsers = activeUsers.filter(u => resolvedUserIds.has(u.id));
+  const resolvedUsers = activeUsers.filter(u => resolvedIds.includes(u.id));
 
   // Filtered lists per tab
   const filteredUsers = activeUsers.filter(u =>
@@ -132,53 +134,44 @@ export function EventCreate() {
   );
 
   const toggleUser = (uid: string, checked: boolean) => {
-    setSelectedUserIds(prev => {
-      const next = new Set(prev);
-      if (checked) next.add(uid); else next.delete(uid);
-      return next;
-    });
+    setDirectIds(prev => { const s = new Set(prev); if (checked) s.add(uid); else s.delete(uid); return s; });
+    // Re-checking a user that was excluded should clear the exclusion
+    if (checked) setExcludedIds(prev => { const s = new Set(prev); s.delete(uid); return s; });
   };
 
   const toggleGroup = (gid: string, checked: boolean) => {
-    setSelectedGroupIds(prev => {
-      const next = new Set(prev);
-      if (checked) next.add(gid); else next.delete(gid);
-      return next;
-    });
+    setGroupIds(prev => { const s = new Set(prev); if (checked) s.add(gid); else s.delete(gid); return s; });
+    if (!checked) {
+      // When deselecting a group, remove its members from exclusions so re-adding works cleanly
+      const memberIds = userGroups.find(g => g.id === gid)?.memberIds ?? [];
+      setExcludedIds(prev => {
+        const s = new Set(prev);
+        memberIds.forEach(id => s.delete(id));
+        return s;
+      });
+    }
   };
 
   const toggleDept = (name: string, checked: boolean) => {
-    setSelectedDeptNames(prev => {
-      const next = new Set(prev);
-      if (checked) next.add(name); else next.delete(name);
-      return next;
-    });
+    setDeptIds(prev => { const s = new Set(prev); if (checked) s.add(name); else s.delete(name); return s; });
+    if (!checked) {
+      // When deselecting a dept, remove its members from exclusions so re-adding works cleanly
+      const memberIds = activeUsers.filter(u => u.department === name).map(u => u.id);
+      setExcludedIds(prev => {
+        const s = new Set(prev);
+        memberIds.forEach(id => s.delete(id));
+        return s;
+      });
+    }
   };
 
   const removeResolved = (uid: string) => {
-    setSelectedUserIds(prev => { const n = new Set(prev); n.delete(uid); return n; });
-    // Also remove from groups/depts if they pulled this user in — simplest: just remove direct
-    // Group/dept selections can't be surgically removed here; add to direct selection negation
-    // For simplicity: remove from direct and uncheck any group that only had this user
-    setSelectedGroupIds(prev => {
-      const n = new Set(prev);
-      for (const gId of prev) {
-        const grp = userGroups.find(g => g.id === gId);
-        if (grp?.memberIds.includes(uid) && grp.memberIds.every(mid => mid === uid || !resolvedUserIds.has(mid))) {
-          n.delete(gId);
-        }
-      }
-      return n;
-    });
-    setSelectedDeptNames(prev => {
-      const n = new Set(prev);
-      const user = activeUsers.find(u => u.id === uid);
-      if (user?.department) {
-        const othersFromDept = resolvedUsers.filter(u => u.id !== uid && u.department === user.department);
-        if (othersFromDept.length === 0) n.delete(user.department);
-      }
-      return n;
-    });
+    if (directIds.has(uid)) {
+      setDirectIds(prev => { const s = new Set(prev); s.delete(uid); return s; });
+    } else {
+      // Came from a group or dept — add to exclusion list
+      setExcludedIds(prev => new Set([...prev, uid]));
+    }
   };
 
   const validate = (): boolean => {
@@ -194,6 +187,27 @@ export function EventCreate() {
 
   const handleSaveDraft = () => {
     if (!form.name.trim()) { setErrors({ name: 'Event name is required to save as draft.' }); return; }
+    const draft: AssessmentEvent = {
+      id: `e_${Date.now()}`,
+      templateId: form.templateId,
+      name: form.name.trim(),
+      description: form.description.trim(),
+      status: 'Draft' as EventStatus,
+      ownerId: user?.id ?? '',
+      startDate: form.startDate,
+      endDate: form.endDate,
+      targetMaturityLevel: form.targetMaturityLevel || undefined,
+      reassessmentDate: form.reassessmentDate || undefined,
+      respondentIds: resolvedIds,
+      respondentProgress: resolvedIds.map(uid => ({
+        userId: uid,
+        completionPct: 0,
+        status: 'Not Started' as const,
+      })),
+      completionRate: 0,
+      createdAt: new Date().toISOString(),
+    };
+    saveEvent(draft);
     navigate('/');
   };
 
@@ -211,13 +225,13 @@ export function EventCreate() {
       name: form.name.trim(),
       description: form.description.trim(),
       status: 'Open' as EventStatus,
-      ownerId: 'u1',
+      ownerId: user?.id ?? '',
       startDate: form.startDate,
       endDate: form.endDate,
       targetMaturityLevel: form.targetMaturityLevel || undefined,
       reassessmentDate: form.reassessmentDate || undefined,
-      respondentIds: [...resolvedUserIds],
-      respondentProgress: [...resolvedUserIds].map(uid => ({
+      respondentIds: resolvedIds,
+      respondentProgress: resolvedIds.map(uid => ({
         userId: uid,
         completionPct: 0,
         status: 'Not Started' as const,
@@ -225,11 +239,12 @@ export function EventCreate() {
       completionRate: 0,
       createdAt: new Date().toISOString(),
     };
+    saveEvent(newEvent);
     setLaunched(true);
     toast({ title: 'Event launched successfully', description: newEvent.name, variant: 'success' });
     setTimeout(() => {
       setConfirmOpen(false);
-      navigate(`/events/${newId}`, { state: { event: newEvent, template: tpl } });
+      navigate(`/events/${newId}`);
     }, 1200);
   };
 
@@ -382,8 +397,8 @@ export function EventCreate() {
                   <Users size={15} className="text-muted-foreground" />
                   <span className="text-sm font-semibold text-foreground">Assign Respondents</span>
                 </div>
-                <Badge variant={resolvedUserIds.size > 0 ? 'default' : 'outline'}>
-                  {resolvedUserIds.size}
+                <Badge variant={resolvedIds.length > 0 ? 'default' : 'outline'}>
+                  {resolvedIds.length}
                 </Badge>
               </div>
 
@@ -431,7 +446,7 @@ export function EventCreate() {
                           id={u.id}
                           label={u.name}
                           sub={`${u.department ?? '—'} · ${u.role}`}
-                          checked={selectedUserIds.has(u.id)}
+                          checked={directIds.has(u.id)}
                           onChange={checked => toggleUser(u.id, checked)}
                         />
                       ))
@@ -445,7 +460,7 @@ export function EventCreate() {
                           id={g.id}
                           label={g.name}
                           sub={`${g.memberIds.length} member${g.memberIds.length !== 1 ? 's' : ''}`}
-                          checked={selectedGroupIds.has(g.id)}
+                          checked={groupIds.has(g.id)}
                           onChange={checked => toggleGroup(g.id, checked)}
                         />
                       ))
@@ -461,7 +476,7 @@ export function EventCreate() {
                             id={d.id}
                             label={d.name}
                             sub={`${count} active user${count !== 1 ? 's' : ''}`}
-                            checked={selectedDeptNames.has(d.name)}
+                            checked={deptIds.has(d.name)}
                             onChange={checked => toggleDept(d.name, checked)}
                           />
                         );

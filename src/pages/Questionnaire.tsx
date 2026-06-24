@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
 import {
   ChevronDown, ChevronRight, ChevronLeft, X, Paperclip,
-  CheckCircle2, Check, LogOut, Save, Send, Home,
+  CheckCircle2, Check, LogOut, Save, Send, Home, Eye,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +13,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogFooter,
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
-import { events } from '@/services/mockData';
+import { events as seedEvents, currentUser } from '@/services/mockData';
+import { getEvents, getTemplateSections, getSubmission, saveSubmission, updateEvent } from '@/services/store';
 import { cn } from '@/lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -635,24 +637,64 @@ function SuccessScreen({ eventName, onHome }: { eventName: string; onHome: () =>
 
 // ─── Main Questionnaire ───────────────────────────────────────────────────────
 
+function buildSections(eventId: string | undefined): QuestionnaireSection[] {
+  if (!eventId) return SECTIONS;
+  const allEventsMap = new globalThis.Map([...seedEvents, ...getEvents()].map(e => [e.id, e]));
+  const event = allEventsMap.get(eventId);
+  if (!event) return SECTIONS;
+  const stored = getTemplateSections(event.templateId);
+  if (!stored) {
+    console.warn('No template sections found, using defaults');
+    return SECTIONS;
+  }
+  return stored.map(sec => ({
+    id: sec.id,
+    name: sec.name,
+    description: sec.description,
+    questions: sec.questions.map(q => ({
+      id: q.id,
+      text: q.text,
+      guidance: q.guidance || undefined,
+      type: q.type,
+      required: q.required,
+      options: (q.type === 'single-choice' || q.type === 'multi-choice')
+        ? q.options.map(o => ({ id: o.id, text: o.text }))
+        : undefined,
+      minLabel: q.minLabel || undefined,
+      maxLabel: q.maxLabel || undefined,
+    })),
+  }));
+}
+
 export function Questionnaire() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const event = events.find(e => e.id === id);
+  const { user } = useAuth();
+  const isPreview = searchParams.get('mode') === 'preview';
+  const userId = user?.id ?? currentUser.id;
+  const allEventsMap = new globalThis.Map([...seedEvents, ...getEvents()].map(e => [e.id, e]));
+  const event = id ? allEventsMap.get(id) : undefined;
 
+  const sections = buildSections(id);
   const storageKey = `g2a-questionnaire-${id}`;
 
   // ── State ──
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>(() => {
+    const saved = getSubmission(id ?? '', userId);
+    if (saved) return saved.answers as Record<string, AnswerValue>;
     try {
-      const saved = localStorage.getItem(storageKey);
-      return saved ? (JSON.parse(saved) as Record<string, AnswerValue>) : {};
+      const raw = localStorage.getItem(storageKey);
+      return raw ? (JSON.parse(raw) as Record<string, AnswerValue>) : {};
     } catch { return {}; }
   });
   const [evidence, setEvidence] = useState<Record<string, EvidenceFile[]>>({});
   const [currentIdx, setCurrentIdx] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [lastSaved, setLastSaved] = useState<Date | null>(() => {
+    const saved = getSubmission(id ?? '', userId);
+    return saved?.submittedAt ? new Date(saved.submittedAt) : null;
+  });
   const [, forceTimeUpdate] = useState(0);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -665,11 +707,28 @@ export function Questionnaire() {
   useEffect(() => {
     const interval = setInterval(() => {
       setSaving(true);
-      localStorage.setItem(storageKey, JSON.stringify(answersRef.current));
+      const current = answersRef.current;
+      const answered = sections.flatMap(s => s.questions).filter(q => isAnswered(q, current)).length;
+      const total = sections.flatMap(s => s.questions.filter(q => q.required)).length;
+      const pct = total > 0 ? Math.round((answered / total) * 100) : 0;
+      localStorage.setItem(storageKey, JSON.stringify(current));
+      if (id) {
+        saveSubmission(id, userId, {
+          eventId: id, userId: userId,
+          answers: current, completionPct: pct, status: 'In Progress',
+        });
+        updateEvent(id, {
+          respondentProgress: event?.respondentProgress.map(p =>
+            p.userId === userId
+              ? { ...p, completionPct: pct, status: 'In Progress', lastActivity: new Date().toISOString() }
+              : p
+          ) ?? [],
+        });
+      }
       setTimeout(() => { setSaving(false); setLastSaved(new Date()); }, 600);
     }, 30000);
     return () => clearInterval(interval);
-  }, [storageKey]);
+  }, [storageKey, id, sections]);
 
   // ── Refresh "X minutes ago" text every 60s ──
   useEffect(() => {
@@ -696,21 +755,51 @@ export function Questionnaire() {
 
   const manualSave = () => {
     setSaving(true);
+    const answered = sections.flatMap(s => s.questions).filter(q => isAnswered(q, answers)).length;
+    const total = sections.flatMap(s => s.questions.filter(q => q.required)).length;
+    const pct = total > 0 ? Math.round((answered / total) * 100) : 0;
     localStorage.setItem(storageKey, JSON.stringify(answers));
+    if (id) {
+      saveSubmission(id, userId, {
+        eventId: id, userId, answers, completionPct: pct, status: 'In Progress',
+      });
+      updateEvent(id, {
+        respondentProgress: event?.respondentProgress.map(p =>
+          p.userId === userId
+            ? { ...p, completionPct: pct, status: 'In Progress', lastActivity: new Date().toISOString() }
+            : p
+        ) ?? [],
+      });
+    }
     setTimeout(() => { setSaving(false); setLastSaved(new Date()); }, 600);
   };
 
   const handleConfirmSubmit = () => {
+    if (id) {
+      const now = new Date().toISOString();
+      saveSubmission(id, userId, {
+        eventId: id, userId: userId,
+        answers, completionPct: 100, status: 'Submitted',
+        submittedAt: now,
+      });
+      updateEvent(id, {
+        respondentProgress: event?.respondentProgress.map(p =>
+          p.userId === userId
+            ? { ...p, completionPct: 100, status: 'Submitted', lastActivity: now }
+            : p
+        ) ?? [],
+      });
+    }
     localStorage.removeItem(storageKey);
     setSubmitted(true);
     setSubmitOpen(false);
   };
 
   // ── Derived ──
-  const currentSection = SECTIONS[currentIdx];
+  const currentSection = sections[currentIdx];
   const sectionComplete = currentSection.questions.every(q => isAnswered(q, answers));
-  const allComplete = SECTIONS.every(s => s.questions.every(q => isAnswered(q, answers)));
-  const isLast = currentIdx === SECTIONS.length - 1;
+  const allComplete = sections.every(s => s.questions.every(q => isAnswered(q, answers)));
+  const isLast = currentIdx === sections.length - 1;
   const isFirst = currentIdx === 0;
   const eventName = event?.name ?? 'Assessment';
   const dueDate = event?.endDate
@@ -726,6 +815,18 @@ export function Questionnaire() {
     <TooltipProvider delayDuration={200}>
       <div className="flex flex-col h-screen overflow-hidden bg-background">
 
+        {/* ── Preview banner ── */}
+        {isPreview && (
+          <div className="flex items-center justify-between px-5 py-2 bg-amber-50 border-b border-amber-200 shrink-0">
+            <div className="flex items-center gap-2 text-amber-700 text-xs font-semibold">
+              <Eye size={13} /> VIEW ONLY — your answers are not being changed
+            </div>
+            <Link to="/" className="text-xs text-amber-700 underline underline-offset-2 hover:text-amber-900">
+              Back to Home
+            </Link>
+          </div>
+        )}
+
         {/* ── Top bar ── */}
         <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-5 gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -736,34 +837,37 @@ export function Questionnaire() {
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
-            {/* Save indicator */}
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              {saving ? (
-                <>
-                  <Save size={12} className="animate-pulse text-primary" />
-                  <span>Saving…</span>
-                </>
-              ) : lastSaved ? (
-                <>
-                  <Save size={12} />
-                  <span>Last saved {formatRelativeSaved(lastSaved)}</span>
-                </>
-              ) : (
-                <span className="opacity-50">Not saved yet</span>
-              )}
-            </div>
-
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={manualSave} disabled={saving}>
-              Save
-            </Button>
+            {/* Save indicator — hidden in preview */}
+            {!isPreview && (
+              <>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {saving ? (
+                    <>
+                      <Save size={12} className="animate-pulse text-primary" />
+                      <span>Saving…</span>
+                    </>
+                  ) : lastSaved ? (
+                    <>
+                      <Save size={12} />
+                      <span>Last saved {formatRelativeSaved(lastSaved)}</span>
+                    </>
+                  ) : (
+                    <span className="opacity-50">Not saved yet</span>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={manualSave} disabled={saving}>
+                  Save
+                </Button>
+              </>
+            )}
 
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" asChild>
-                  <Link to={`/events/${id}`}><LogOut size={15} /></Link>
+                  <Link to="/"><LogOut size={15} /></Link>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Exit to event dashboard</TooltipContent>
+              <TooltipContent>Exit to Home</TooltipContent>
             </Tooltip>
           </div>
         </header>
@@ -781,21 +885,21 @@ export function Questionnaire() {
                     className="h-full bg-primary rounded-full transition-all duration-500"
                     style={{
                       width: `${Math.round(
-                        SECTIONS.reduce((n, s) => n + s.questions.filter(q => isAnswered(q, answers)).length, 0) /
-                        SECTIONS.reduce((n, s) => n + s.questions.filter(q => q.required).length, 0) * 100
+                        sections.reduce((n, s) => n + s.questions.filter(q => isAnswered(q, answers)).length, 0) /
+                        sections.reduce((n, s) => n + s.questions.filter(q => q.required).length, 0) * 100
                       )}%`,
                     }}
                   />
                 </div>
                 <span className="text-[10px] text-muted-foreground shrink-0">
-                  {SECTIONS.reduce((n, s) => n + s.questions.filter(q => isAnswered(q, answers)).length, 0)}/
-                  {SECTIONS.reduce((n, s) => n + s.questions.filter(q => q.required).length, 0)}
+                  {sections.reduce((n, s) => n + s.questions.filter(q => isAnswered(q, answers)).length, 0)}/
+                  {sections.reduce((n, s) => n + s.questions.filter(q => q.required).length, 0)}
                 </span>
               </div>
             </div>
 
             <nav className="flex-1 p-2 space-y-1">
-              {SECTIONS.map((section, idx) => {
+              {sections.map((section, idx) => {
                 const status = sectionStatus(section, answers);
                 const active = idx === currentIdx;
                 return (
@@ -843,7 +947,7 @@ export function Questionnaire() {
               {/* Section header */}
               <div className="mb-8">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                  <span className="font-medium">Section {currentIdx + 1} of {SECTIONS.length}</span>
+                  <span className="font-medium">Section {currentIdx + 1} of {sections.length}</span>
                   <span>·</span>
                   <span>{currentSection.questions.filter(q => isAnswered(q, answers)).length} of {currentSection.questions.filter(q => q.required).length} answered</span>
                 </div>
@@ -880,7 +984,14 @@ export function Questionnaire() {
                 </Button>
 
                 <div className="flex items-center gap-2">
-                  {isLast ? (
+                  {isPreview ? (
+                    /* In preview mode show only section navigation, no submit */
+                    !isLast && (
+                      <Button onClick={() => setCurrentIdx(i => i + 1)} className="gap-2">
+                        Next Section <ChevronRight size={15} />
+                      </Button>
+                    )
+                  ) : isLast ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className={!allComplete ? 'cursor-not-allowed' : ''}>
@@ -938,7 +1049,7 @@ export function Questionnaire() {
                 <div className="rounded-lg bg-muted/50 border px-4 py-3 space-y-1 text-sm">
                   <p className="font-medium text-foreground">{eventName}</p>
                   <p className="text-muted-foreground text-xs">
-                    {SECTIONS.length} sections · {SECTIONS.reduce((n, s) => n + s.questions.length, 0)} questions
+                    {sections.length} sections · {sections.reduce((n, s) => n + s.questions.length, 0)} questions
                   </p>
                 </div>
                 <p className="text-sm text-muted-foreground">Are you sure you want to submit?</p>

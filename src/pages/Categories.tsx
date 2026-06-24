@@ -322,7 +322,7 @@ function CatCard({ category, templateCount, canManage, onEdit, onToggleArchive, 
 export function Categories() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const canManage = user?.role === 'admin' || user?.role === 'assessor';
+  const canManage = user?.role === 'admin';
 
   const [cats, setCats] = useState<Category[]>(seedCategories);
   const [localTemplates] = useState(seedTemplates);

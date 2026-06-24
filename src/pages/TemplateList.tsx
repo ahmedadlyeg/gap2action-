@@ -170,7 +170,7 @@ export function TemplateList() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const canManage = user?.role === 'admin' || user?.role === 'assessor';
+  const canManage = user?.role === 'admin';
 
   // Category: prefer router state (for newly created categories not in seedData)
   const category: Category | undefined =

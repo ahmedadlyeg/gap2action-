@@ -108,3 +108,53 @@ export interface Task {
   sourceRecommendationId: string | null;
   completionPct: number;
 }
+
+// ─── Template Builder ─────────────────────────────────────────────────────────
+
+export type QuestionType = 'single-choice' | 'multi-choice' | 'rating-scale' | 'yes-no' | 'free-text';
+
+export interface AnswerOption {
+  id: string;
+  text: string;
+  score: number;
+}
+
+export interface BuilderQuestion {
+  id: string;
+  sectionId: string;
+  text: string;
+  guidance: string;
+  type: QuestionType;
+  required: boolean;
+  options: AnswerOption[];
+  minLabel: string;
+  maxLabel: string;
+  ratingScores: number[];
+  yesScore: number;
+  noScore: number;
+}
+
+export interface BuilderSection {
+  id: string;
+  name: string;
+  description: string;
+  weight: number;
+  questions: BuilderQuestion[];
+}
+
+// ─── Persistence ──────────────────────────────────────────────────────────────
+
+export interface QuestionnaireSubmission {
+  eventId: string;
+  userId: string;
+  answers: Record<string, string | string[] | number>;
+  completionPct: number;
+  status: 'In Progress' | 'Submitted';
+  submittedAt?: string;
+}
+
+export interface RespondentAction {
+  status: 'Validated' | 'Returned';
+  feedback?: string;
+  actionAt: string;
+}

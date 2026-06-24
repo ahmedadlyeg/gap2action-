@@ -220,6 +220,188 @@ const e3Result: EventResultData = {
   ],
 };
 
+// ── e1 — EA Maturity Assessment Q3 2026 ─────────────────────────────────────
+// Overall: 2.9 / 5.0 → Level 2 (Managed). Target: 4.0 (Quantitatively Managed)
+// Respondents: u3 (Sarah Chen), u4 (James Carter), u5 (Maria Rodriguez)
+
+const e1Result: EventResultData = {
+  eventId: 'e1',
+  overallScore: 2.9,
+  targetScore: 4.0,
+  maturityLevelNum: 2,
+  maturityLevelName: 'Managed',
+  targetLevelNum: 4,
+  targetLevelName: 'Quantitatively Managed',
+  respondentIds: ['u3', 'u4', 'u5'],
+  completedDate: '2026-09-30',
+  sections: [
+    {
+      id: 's1',
+      name: 'Strategy & Planning',
+      achievedScore: 3.2,
+      targetScore: 4.0,
+      weightPct: 40,
+      questions: [
+        {
+          id: 'q1-1',
+          sectionId: 's1',
+          text: 'How well is the EA strategy aligned with the overall business strategy?',
+          type: 'scored',
+          maxScore: 5,
+          respondentScores: { u3: 5, u4: 3, u5: 2 },
+          respondentLabels: { u3: 'Fully aligned', u4: 'Partially aligned', u5: 'No discernible alignment' },
+          averageScore: 3.3,
+        },
+        {
+          id: 'q1-2',
+          sectionId: 's1',
+          text: 'Rate the maturity of the current EA roadmap.',
+          type: 'scored',
+          maxScore: 5,
+          respondentScores: { u3: 4, u4: 3, u5: 2 },
+          respondentLabels: { u3: '4 / 5', u4: '3 / 5', u5: '2 / 5' },
+          averageScore: 3.0,
+        },
+      ],
+    },
+    {
+      id: 's2',
+      name: 'Architecture Governance',
+      achievedScore: 2.5,
+      targetScore: 4.0,
+      weightPct: 35,
+      questions: [
+        {
+          id: 'q2-1',
+          sectionId: 's2',
+          text: 'Does the organisation have a formal Architecture Review Board (ARB)?',
+          type: 'scored',
+          maxScore: 5,
+          respondentScores: { u3: 5, u4: 1, u5: 1 },
+          respondentLabels: { u3: 'Yes', u4: 'No', u5: 'No' },
+          averageScore: 2.3,
+        },
+      ],
+    },
+    {
+      id: 's3',
+      name: 'Technology & Data',
+      achievedScore: 3.0,
+      targetScore: 4.0,
+      weightPct: 25,
+      questions: [
+        {
+          id: 'q3-1',
+          sectionId: 's3',
+          text: 'Rate the maturity of data architecture and data governance practices.',
+          type: 'scored',
+          maxScore: 5,
+          respondentScores: { u3: 3, u4: 3, u5: 3 },
+          respondentLabels: { u3: '3 / 5', u4: '3 / 5', u5: '3 / 5' },
+          averageScore: 3.0,
+        },
+      ],
+    },
+  ],
+};
+
+// ── e2 — Digital Maturity Index H1 2026 ─────────────────────────────────────
+// Overall: 2.4 / 5.0 → Level 2 (Managed). Target: 3.0 (Defined)
+// Respondents: u1 (Alexandra Mitchell), u3 (Sarah Chen)
+
+const e2Result: EventResultData = {
+  eventId: 'e2',
+  overallScore: 2.4,
+  targetScore: 3.0,
+  maturityLevelNum: 2,
+  maturityLevelName: 'Managed',
+  targetLevelNum: 3,
+  targetLevelName: 'Defined',
+  respondentIds: ['u1', 'u3'],
+  completedDate: '2026-06-15',
+  sections: [
+    {
+      id: 'e2s1',
+      name: 'Digital Strategy',
+      achievedScore: 2.8,
+      targetScore: 3.5,
+      weightPct: 35,
+      questions: [
+        {
+          id: 'e2q1-1',
+          sectionId: 'e2s1',
+          text: 'How clearly is the digital transformation strategy defined and communicated?',
+          type: 'scored',
+          maxScore: 5,
+          respondentScores: { u1: 4, u3: 2 },
+          respondentLabels: { u1: 'Clearly defined', u3: 'Partially defined' },
+          averageScore: 3.0,
+        },
+        {
+          id: 'e2q1-2',
+          sectionId: 'e2s1',
+          text: 'Rate the alignment between digital initiatives and business priorities.',
+          type: 'scored',
+          maxScore: 5,
+          respondentScores: { u1: 3, u3: 2 },
+          respondentLabels: { u1: '3 / 5', u3: '2 / 5' },
+          averageScore: 2.5,
+        },
+      ],
+    },
+    {
+      id: 'e2s2',
+      name: 'Data & Analytics',
+      achievedScore: 2.0,
+      targetScore: 3.0,
+      weightPct: 35,
+      questions: [
+        {
+          id: 'e2q2-1',
+          sectionId: 'e2s2',
+          text: 'Rate the organisation\'s use of data analytics for decision-making.',
+          type: 'scored',
+          maxScore: 5,
+          respondentScores: { u1: 2, u3: 2 },
+          respondentLabels: { u1: '2 / 5', u3: '2 / 5' },
+          averageScore: 2.0,
+        },
+        {
+          id: 'e2q2-2',
+          sectionId: 'e2s2',
+          text: 'Does the organisation have a formal data governance framework?',
+          type: 'scored',
+          maxScore: 5,
+          respondentScores: { u1: 3, u3: 1 },
+          respondentLabels: { u1: 'Yes', u3: 'No' },
+          averageScore: 2.0,
+        },
+      ],
+    },
+    {
+      id: 'e2s3',
+      name: 'Technology Enablement',
+      achievedScore: 2.5,
+      targetScore: 2.5,
+      weightPct: 30,
+      questions: [
+        {
+          id: 'e2q3-1',
+          sectionId: 'e2s3',
+          text: 'Rate the maturity of cloud adoption across the organisation.',
+          type: 'scored',
+          maxScore: 5,
+          respondentScores: { u1: 3, u3: 2 },
+          respondentLabels: { u1: '3 / 5', u3: '2 / 5' },
+          averageScore: 2.5,
+        },
+      ],
+    },
+  ],
+};
+
 export const resultsByEventId: Record<string, EventResultData> = {
+  e1: e1Result,
+  e2: e2Result,
   e3: e3Result,
 };

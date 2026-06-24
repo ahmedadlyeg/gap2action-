@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useParams, Link, useLocation } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import {
-  ClipboardList, Users, BarChart2, AlertCircle, Map, GitCompare,
+  ClipboardList, Users, BarChart2, AlertCircle, Map as MapIcon, GitCompare,
   CheckCircle2, MessageSquare, Eye, ArrowRight, CalendarDays,
   Target, RotateCcw, FileText,
 } from 'lucide-react';
@@ -28,6 +28,7 @@ import { RoadmapTab } from '@/components/event/RoadmapTab';
 import { CompareTab } from '@/components/event/CompareTab';
 import { useToast } from '@/context/ToastContext';
 import { events as seedEvents, templates, users } from '@/services/mockData';
+import { getEvents, getSubmission, getTemplateSections, saveRespondentAction, getRespondentAction } from '@/services/store';
 import type { AssessmentEvent, Template, RespondentProgress, RespondentStatus } from '@/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -154,23 +155,34 @@ function StatusBar({ progress }: { progress: RespondentProgress[] }) {
   );
 }
 
-// ─── Mock Q&A for View Response sheet ────────────────────────────────────────
-
-const MOCK_QA = [
-  { q: 'How well is the EA strategy aligned with the overall business strategy?', a: 'Partially aligned — some linkage but not formalised', score: 2, max: 4 },
-  { q: 'Rate the maturity of the current EA roadmap.', a: 'Level 3 — Roadmap exists with milestone-level visibility', score: 3, max: 5 },
-  { q: 'Does the organization have a formal Architecture Review Board (ARB)?', a: 'Yes', score: 5, max: 5 },
-  { q: 'Describe the current exception-handling process for architecture non-compliance.', a: 'We escalate to the CTO for exceptions. There is no formal waiver process yet.', score: null, max: null },
-  { q: 'Rate the completeness of architecture artefacts (models, diagrams, decisions).', a: 'Level 2 — Partial coverage; some business domains undocumented', score: 2, max: 5 },
-];
-
 function ViewResponseSheet({
-  open, userId, onClose,
-}: { open: boolean; userId: string | null; onClose: () => void }) {
+  open, userId, eventId, templateId, onClose,
+}: { open: boolean; userId: string | null; eventId: string; templateId: string; onClose: () => void }) {
   const uName = userId ? userName(userId) : '';
-  const prog = userId
-    ? { completionPct: 80, status: 'Submitted' as RespondentStatus }
-    : null;
+  const submission = userId ? getSubmission(eventId, userId) : null;
+  const sections = getTemplateSections(templateId);
+
+  type QAPair = { qNum: number; text: string; answer: string; type: string };
+  const qaPairs: QAPair[] = [];
+
+  if (submission && sections) {
+    let qNum = 0;
+    for (const sec of sections) {
+      for (const q of sec.questions) {
+        qNum++;
+        const raw = submission.answers[q.id];
+        let answer = '';
+        if (raw === undefined || raw === null || raw === '') {
+          answer = '—';
+        } else if (Array.isArray(raw)) {
+          answer = raw.join(', ');
+        } else {
+          answer = String(raw);
+        }
+        qaPairs.push({ qNum, text: q.text, answer, type: q.type });
+      }
+    }
+  }
 
   return (
     <Sheet open={open} onOpenChange={v => !v && onClose()}>
@@ -178,29 +190,38 @@ function ViewResponseSheet({
         <SheetHeader>
           <SheetTitle className="text-base font-semibold">Response — {uName}</SheetTitle>
           <SheetDescription className="text-xs text-muted-foreground">
-            {prog ? `${prog.completionPct}% complete · ${STATUS_CFG[prog.status]?.label}` : ''}
+            {submission
+              ? `${submission.completionPct}% complete · ${STATUS_CFG[submission.status as RespondentStatus]?.label ?? submission.status}`
+              : ''}
           </SheetDescription>
         </SheetHeader>
         <SheetBody className="space-y-5">
-          {MOCK_QA.map((qa, i) => (
-            <div key={i} className="space-y-2">
-              <div className="flex items-start gap-2">
-                <span className="shrink-0 text-[10px] font-mono text-muted-foreground mt-0.5 w-5">Q{i + 1}</span>
-                <p className="text-xs font-medium text-foreground leading-relaxed">{qa.q}</p>
-              </div>
-              <div className="ml-7 rounded-lg bg-muted/40 border px-3 py-2.5">
-                <p className="text-sm text-foreground">{qa.a}</p>
-                {qa.score !== null && (
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Score: <strong>{qa.score}</strong> / {qa.max}
-                  </p>
-                )}
-                {qa.score === null && (
-                  <p className="text-[10px] text-blue-600 mt-1">Free text — AI context only</p>
-                )}
-              </div>
+          {!submission ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
+              <p className="text-sm font-medium text-foreground">No answers submitted yet</p>
+              <p className="text-xs text-muted-foreground">The respondent hasn't saved any answers.</p>
             </div>
-          ))}
+          ) : qaPairs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
+              <p className="text-sm font-medium text-foreground">Template sections not found</p>
+              <p className="text-xs text-muted-foreground">Could not load questions for this template.</p>
+            </div>
+          ) : (
+            qaPairs.map((qa) => (
+              <div key={qa.qNum} className="space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 text-[10px] font-mono text-muted-foreground mt-0.5 w-5">Q{qa.qNum}</span>
+                  <p className="text-xs font-medium text-foreground leading-relaxed">{qa.text}</p>
+                </div>
+                <div className="ml-7 rounded-lg bg-muted/40 border px-3 py-2.5">
+                  <p className="text-sm text-foreground">{qa.answer}</p>
+                  {qa.type === 'text' && qa.answer !== '—' && (
+                    <p className="text-[10px] text-blue-600 mt-1">Free text — AI context only</p>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
         </SheetBody>
       </SheetContent>
     </Sheet>
@@ -278,21 +299,29 @@ type SubmissionsFilter = 'all' | 'pending' | 'not-started' | 'overdue';
 
 export function EventDashboard() {
   const { id } = useParams<{ id: string }>();
-  const location = useLocation();
-  const locationState = location.state as { event?: AssessmentEvent; template?: Template } | null;
-
-  const event = seedEvents.find(e => e.id === id) ?? locationState?.event;
-  const template =
-    (event ? templates.find(t => t.id === event.templateId) : null) ??
-    locationState?.template ??
-    null;
+  const allEvents = new Map(
+    [...seedEvents, ...getEvents()].map(e => [e.id, e])
+  );
+  const event = id ? allEvents.get(id) : undefined;
+  const template = (event ? templates.find(t => t.id === event.templateId) : null) ?? null;
 
   const { toast } = useToast();
   const [tab, setTab] = useState('overview');
   const [pendingRecName, setPendingRecName] = useState<string | null>(null);
-  const [progress, setProgress] = useState<RespondentProgress[]>(
-    () => event?.respondentProgress ?? []
-  );
+  const [progress, setProgress] = useState<RespondentProgress[]>(() => {
+    const base = event?.respondentProgress ?? [];
+    if (!event) return base;
+    return base.map(p => {
+      const action = getRespondentAction(event.id, p.userId);
+      if (!action) return p;
+      return {
+        ...p,
+        status: action.status as RespondentProgress['status'],
+        feedback: action.feedback ?? p.feedback,
+        lastActivity: action.actionAt ?? p.lastActivity,
+      };
+    });
+  });
   const [viewUserId, setViewUserId] = useState<string | null>(null);
   const [returnUserId, setReturnUserId] = useState<string | null>(null);
   const [filter, setFilter] = useState<SubmissionsFilter>('all');
@@ -312,16 +341,20 @@ export function EventDashboard() {
 
   // Actions
   const validateUser = (uid: string) => {
+    const now = new Date().toISOString();
     setProgress(prev => prev.map(p =>
-      p.userId === uid ? { ...p, status: 'Validated', lastActivity: new Date().toISOString() } : p
+      p.userId === uid ? { ...p, status: 'Validated', lastActivity: now } : p
     ));
+    if (event) saveRespondentAction(event.id, uid, { status: 'Validated', actionAt: now });
     toast({ title: 'Response validated', variant: 'success' });
   };
 
   const returnUser = (uid: string, feedback: string) => {
+    const now = new Date().toISOString();
     setProgress(prev => prev.map(p =>
-      p.userId === uid ? { ...p, status: 'Returned', feedback, lastActivity: new Date().toISOString() } : p
+      p.userId === uid ? { ...p, status: 'Returned', feedback, lastActivity: now } : p
     ));
+    if (event) saveRespondentAction(event.id, uid, { status: 'Returned', feedback, actionAt: now });
     setReturnUserId(null);
     toast({ title: 'Response returned for revision', description: 'The respondent has been notified.', variant: 'warning' });
   };
@@ -330,7 +363,7 @@ export function EventDashboard() {
   const filteredProgress = progress.filter(p => {
     if (filter === 'pending') return p.status === 'Submitted';
     if (filter === 'not-started') return p.status === 'Not Started';
-    if (filter === 'overdue') return p.status !== 'Validated' && p.status !== 'Submitted';
+    if (filter === 'overdue') return p.status !== 'Submitted' && p.status !== 'Validated' && new Date(event.endDate) < new Date();
     return true;
   });
 
@@ -340,7 +373,7 @@ export function EventDashboard() {
     { value: 'results', label: 'Results', icon: BarChart2 },
     { value: 'gaps', label: 'Gaps', icon: AlertCircle },
     { value: 'recommendations', label: 'Recommendations', icon: MessageSquare },
-    { value: 'roadmap', label: 'Roadmap', icon: Map },
+    { value: 'roadmap', label: 'Roadmap', icon: MapIcon },
     { value: 'compare', label: 'Compare', icon: GitCompare },
   ];
 
@@ -551,7 +584,7 @@ export function EventDashboard() {
                     { key: 'all', label: 'All', count: total },
                     { key: 'pending', label: 'Pending Validation', count: submitted },
                     { key: 'not-started', label: 'Not Started', count: notStarted },
-                    { key: 'overdue', label: 'Overdue', count: progress.filter(p => p.status !== 'Validated' && p.status !== 'Submitted').length },
+                    { key: 'overdue', label: 'Overdue', count: progress.filter(p => p.status !== 'Submitted' && p.status !== 'Validated' && new Date(event.endDate) < new Date()).length },
                   ] as const).map(f => (
                     <button
                       key={f.key}
@@ -754,6 +787,8 @@ export function EventDashboard() {
       <ViewResponseSheet
         open={viewUserId !== null}
         userId={viewUserId}
+        eventId={event.id}
+        templateId={event.templateId}
         onClose={() => setViewUserId(null)}
       />
       <ReturnDialog
