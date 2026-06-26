@@ -4,7 +4,7 @@ import { useDirtyState } from '@/context/DirtyStateContext';
 import {
   LayoutDashboard, FolderOpen, Users, BarChart2,
   ChevronDown, ChevronRight, LogOut, CalendarCheck,
-  Building2, Zap, LayoutTemplate, PanelLeftClose, PanelLeftOpen,
+  Building2, Zap, LayoutTemplate, PanelLeftClose, PanelLeftOpen, TrendingUp, LayoutGrid, ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -186,14 +186,19 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
           {/* Respondent */}
           {role === 'respondent' && (
-            <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} color="blue" />
+            <>
+              <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} color="blue" />
+              <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} color="green" />
+            </>
           )}
 
           {/* Assessor */}
           {role === 'assessor' && (
             <>
               <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} color="blue" />
+              <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} color="green" />
               <NavItem to="/" icon={CalendarCheck} label="My Events" collapsed={collapsed} color="orange" end={false} />
+              <NavItem to="/tasks" icon={ListChecks} label="All Tasks" collapsed={collapsed} color="green" />
               <SectionLabel label="Tools" collapsed={collapsed} />
               <NavItem to="/categories" icon={FolderOpen} label="All Categories" collapsed={collapsed} color="green" />
             </>
@@ -203,7 +208,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           {role === 'admin' && (
             <>
               <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} color="blue" />
+              <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} color="green" />
               <NavItem to="/reports" icon={BarChart2} label="Reports" collapsed={collapsed} color="orange" />
+              <NavItem to="/tasks" icon={ListChecks} label="All Tasks" collapsed={collapsed} color="green" />
 
               <SectionLabel label="Assessment Categories" collapsed={collapsed} />
 
@@ -311,6 +318,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               })}
 
               <SectionLabel label="Administration" collapsed={collapsed} />
+              <NavItem to="/admin/frameworks" icon={LayoutGrid} label="Assessment Frameworks" collapsed={collapsed} color="teal" />
               <NavItem to="/categories" icon={FolderOpen} label="Manage Categories" collapsed={collapsed} color="teal" />
               <NavItem to="/users" icon={Users} label="User Management" collapsed={collapsed} color="purple" />
             </>
@@ -342,15 +350,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 <p className="text-xs font-bold text-white truncate">{user?.name}</p>
                 <p className="text-[10px] text-sidebar-muted capitalize mt-0.5">{user?.role}</p>
               </div>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={handleLogout}
-                    className="h-7 w-7 shrink-0 text-sidebar-muted hover:text-red-400 hover:bg-red-400/10">
-                    <LogOut size={14} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">Sign out</TooltipContent>
-              </Tooltip>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleLogout}
+                className="h-7 w-7 shrink-0 text-sidebar-muted hover:text-white hover:bg-white/8"
+              >
+                <LogOut size={14} />
+              </Button>
             </div>
           )}
         </div>

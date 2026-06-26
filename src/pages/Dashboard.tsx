@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ClipboardList, TrendingUp, TrendingDown, Minus,
@@ -10,15 +10,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import {
-  events as seedEvents, templates, users, categories, currentUser,
-} from '@/services/mockData';
-import { getEvents, getReturnFeedback } from '@/services/store';
+import { getEvents, getReturnFeedback, getTemplates, getTemplate, getUsers } from '@/services/store';
 import type { MaturityLevel, RespondentStatus } from '@/types';
 
 function allEvents() {
-  const map = new globalThis.Map([...seedEvents, ...getEvents()].map(e => [e.id, e]));
-  return [...map.values()];
+  return getEvents();
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -87,6 +83,12 @@ function PageShell({ greeting, subtitle, children }: {
 function AssessorDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const refresh = () => setTick(t => t + 1);
+    window.addEventListener('g2a-store-updated', refresh);
+    return () => window.removeEventListener('g2a-store-updated', refresh);
+  }, []);
 
   const ev = allEvents();
   const myEvents = ev.filter(e =>
@@ -146,7 +148,7 @@ function AssessorDashboard() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {myEvents.map(event => {
-              const tpl = templates.find(t => t.id === event.templateId);
+              const tpl = getTemplates().find(t => t.id === event.templateId);
               const submitted = event.respondentProgress.filter(p =>
                 p.status === 'Submitted' || p.status === 'Validated'
               ).length;
@@ -224,6 +226,12 @@ function AssessorDashboard() {
 function RespondentDashboard() {
   const { user } = useAuth();
   const [showCompleted, setShowCompleted] = useState(false);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const refresh = () => setTick(t => t + 1);
+    window.addEventListener('g2a-store-updated', refresh);
+    return () => window.removeEventListener('g2a-store-updated', refresh);
+  }, []);
   const today = new Date();
 
   const myEvents = allEvents().filter(e => e.respondentIds.includes(user?.id ?? ''));
@@ -268,7 +276,7 @@ function RespondentDashboard() {
           <div className="grid gap-4 sm:grid-cols-2">
             {activeEvents
               .sort((a, b) => {
-                const uid = user?.id ?? currentUser.id;
+                const uid = user?.id ?? 'u1';
                 const sortRank = (ev: typeof activeEvents[0]) => {
                   const fb = getReturnFeedback(ev.id, uid);
                   if (fb !== null) return 0;
@@ -282,12 +290,12 @@ function RespondentDashboard() {
                 return diff !== 0 ? diff : new Date(a.endDate).getTime() - new Date(b.endDate).getTime();
               })
               .map(event => {
-                const uid = user?.id ?? currentUser.id;
+                const uid = user?.id ?? 'u1';
                 const returnFeedback = getReturnFeedback(event.id, uid);
                 const isReturned = returnFeedback !== null;
                 const progress = myProgress(event);
                 const overdue = !isReturned && isOverdue(event.endDate);
-                const tpl = templates.find(t => t.id === event.templateId);
+                const tpl = getTemplates().find(t => t.id === event.templateId);
 
                 return (
                   <Card
@@ -437,11 +445,17 @@ function RespondentDashboard() {
 
 function AdminDashboard() {
   const { user } = useAuth();
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const refresh = () => setTick(t => t + 1);
+    window.addEventListener('g2a-store-updated', refresh);
+    return () => window.removeEventListener('g2a-store-updated', refresh);
+  }, []);
 
   const roleCount = {
-    admin: users.filter(u => u.role === 'admin').length,
-    assessor: users.filter(u => u.role === 'assessor').length,
-    respondent: users.filter(u => u.role === 'respondent').length,
+    admin: getUsers().filter(u => u.role === 'admin').length,
+    assessor: getUsers().filter(u => u.role === 'assessor').length,
+    respondent: getUsers().filter(u => u.role === 'respondent').length,
   };
   const ev = allEvents();
   const activeEvents = ev.filter(e => e.status === 'Open' || e.status === 'In Progress');
@@ -521,23 +535,35 @@ function AdminDashboard() {
                   <tr key={event.id} className="hover:bg-muted/30 transition-colors">
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-foreground truncate max-w-[220px]">{event.name}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{event.endDate}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{getTemplate(event.templateId)?.name ?? '—'}</p>
                     </td>
                     <td className="px-5 py-3.5">
-                      <Badge variant={STATUS_VARIANT[event.status] ?? 'outline'}>{event.status}</Badge>
+                      <Badge variant={STATUS_VARIANT[event.status] ?? 'outline'} className="text-[11px]">
+                        {event.status}
+                      </Badge>
                     </td>
                     <td className="px-5 py-3.5 text-right font-semibold text-foreground">
-                      {event.score !== undefined ? `${event.score}%` : '—'}
+                      {event.score != null ? event.score.toFixed(1) : '—'}
                     </td>
                     <td className="px-5 py-3.5 hidden sm:table-cell">
-                      {event.maturityLevel ? <MaturityPill level={event.maturityLevel} /> : <span className="text-muted-foreground">—</span>}
+                      {event.maturityLevel ? (
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${MATURITY_COLOR[event.maturityLevel] ?? 'text-muted-foreground bg-muted'}`}>
+                          {event.maturityLevel}
+                        </span>
+                      ) : '—'}
                     </td>
                     <td className="px-5 py-3.5 text-center">
-                      {event.trend ? TREND_ICON[event.trend] : <span className="text-muted-foreground">—</span>}
+                      {event.score != null ? (
+                        event.score >= 70 ? <TrendingUp size={15} className="text-emerald-500 mx-auto" />
+                        : event.score >= 50 ? <Minus size={15} className="text-amber-500 mx-auto" />
+                        : <TrendingDown size={15} className="text-red-500 mx-auto" />
+                      ) : <Minus size={15} className="text-muted-foreground/40 mx-auto" />}
                     </td>
                     <td className="px-2 py-3.5">
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link to={`/events/${event.id}`}><ArrowRight size={14} /></Link>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
+                        <Link to={`/events/${event.id}?tab=results`}>
+                          <ArrowRight size={14} />
+                        </Link>
                       </Button>
                     </td>
                   </tr>
@@ -547,70 +573,14 @@ function AdminDashboard() {
           </div>
         </Card>
       </div>
-
-      {/* Admin section */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {/* User counts */}
-        <div>
-          <SectionHeader title="Users by Role" />
-          <Card>
-            <CardContent className="pt-5 space-y-3">
-              {(Object.entries(roleCount) as [string, number][]).map(([role, count]) => (
-                <div key={role} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="h-2 w-2 rounded-full bg-primary" />
-                    <span className="text-sm capitalize text-foreground">{role}</span>
-                  </div>
-                  <span className="text-sm font-semibold text-foreground">{count}</span>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" className="w-full mt-2" asChild>
-                <Link to="/users">
-                  <Users size={14} className="mr-1.5" /> Manage Users
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Quick links */}
-        <div>
-          <SectionHeader title="Quick Links" />
-          <Card>
-            <CardContent className="pt-5 space-y-2">
-              {[
-                { to: '/users', icon: Users, label: 'User Management', desc: `${users.length} users` },
-                { to: '/categories', icon: FolderOpen, label: 'Assessment Categories', desc: `${categories.length} categories` },
-              ].map(link => (
-                <Link
-                  key={link.to}
-                  to={link.to}
-                  className="flex items-center gap-3 rounded-lg border p-3.5 hover:bg-muted/50 transition-colors group"
-                >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                    <link.icon size={16} className="text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">{link.label}</p>
-                    <p className="text-xs text-muted-foreground">{link.desc}</p>
-                  </div>
-                  <ArrowRight size={14} className="text-muted-foreground group-hover:text-foreground transition-colors" />
-                </Link>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
     </PageShell>
   );
 }
 
-// ─── Root export — role switch ─────────────────────────────────────────────────
-
+// ─── Main Export ──────────────────────────────────────────────────────────────
 export function Dashboard() {
   const { user } = useAuth();
-
+  if (user?.role === 'admin') return <AdminDashboard />;
   if (user?.role === 'assessor') return <AssessorDashboard />;
-  if (user?.role === 'respondent') return <RespondentDashboard />;
-  return <AdminDashboard />;
+  return <RespondentDashboard />;
 }

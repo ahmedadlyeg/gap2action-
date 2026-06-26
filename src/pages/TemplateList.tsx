@@ -2,7 +2,7 @@ import { Fragment, useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, useParams, useLocation, useNavigate } from 'react-router-dom';
 import {
   Plus, ArrowRight, FileText, Copy, Archive, ArchiveRestore,
-  ChevronDown, Home,
+  ChevronDown, Home, CheckCircle2, LayoutGrid,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -16,10 +16,15 @@ import {
   Sheet, SheetContent, SheetHeader, SheetBody, SheetFooter,
   SheetTitle, SheetDescription, SheetClose,
 } from '@/components/ui/sheet';
+import {
+  Dialog, DialogContent, DialogHeader, DialogFooter,
+  DialogTitle, DialogDescription, DialogClose,
+} from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { categories as seedCategories, users } from '@/services/mockData';
-import { getTemplates, saveTemplate } from '@/services/store';
-import type { Template, TemplateStatus, Category } from '@/types';
+import { getTemplates, saveTemplate, getFrameworks } from '@/services/store';
+import type { Template, TemplateStatus, Category, AssessmentFramework } from '@/types';
+import { scoringMethodLabel } from './FrameworkList';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,6 +61,8 @@ function compareVersion(a: string, b: string): number {
   const [bMaj = 0, bMin = 0] = b.split('.').map(Number);
   return aMaj !== bMaj ? aMaj - bMaj : aMin - bMin;
 }
+
+// ─── Framework Picker Dialog ──────────────────────────────────────────────────
 
 // ─── Template Sheet ───────────────────────────────────────────────────────────
 
@@ -159,6 +166,7 @@ export function TemplateList() {
 
   const [showArchived, setShowArchived] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState<Template | null>(null);
   const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(new Set());
 
@@ -235,6 +243,27 @@ export function TemplateList() {
     setSheetOpen(false);
   };
 
+  const handlePickerConfirm = (frameworkId: string) => {
+    const now = new Date().toISOString();
+    const newTpl: Template = {
+      id: crypto.randomUUID(),
+      categoryId: id!,
+      name: 'Untitled Template',
+      code: genCode('Untitled Template', templates.map(t => t.code)),
+      description: '',
+      version: '1.0',
+      status: 'Draft',
+      questionCount: 0,
+      createdBy: user?.id ?? 'u1',
+      createdAt: now,
+      updatedAt: now,
+      frameworkId,
+    };
+    saveTemplate(newTpl);
+    setPickerOpen(false);
+    navigate(`/templates/${newTpl.id}/builder`);
+  };
+
   // Clone creates an independent copy (no version relationship)
   const handleClone = (tpl: Template) => {
     const clone: Template = {
@@ -300,7 +329,7 @@ export function TemplateList() {
             </div>
           </div>
           {canManage && (
-            <Button size="sm" onClick={() => setSheetOpen(true)} className="shrink-0">
+            <Button size="sm" onClick={() => setPickerOpen(true)} className="shrink-0">
               <Plus size={14} className="mr-1.5" /> Create Template
             </Button>
           )}
@@ -324,7 +353,7 @@ export function TemplateList() {
               <FileText size={28} className="mx-auto text-muted-foreground mb-3 opacity-30" />
               <p className="text-sm text-muted-foreground">No templates in this category yet.</p>
               {canManage && (
-                <Button variant="outline" size="sm" className="mt-4" onClick={() => setSheetOpen(true)}>
+                <Button variant="outline" size="sm" className="mt-4" onClick={() => setPickerOpen(true)}>
                   <Plus size={14} className="mr-1.5" /> Create first template
                 </Button>
               )}
@@ -352,131 +381,158 @@ export function TemplateList() {
                     return (
                       <Fragment key={primary.id}>
                         {/* ── Primary row ── */}
-                        <tr className={`hover:bg-muted/30 transition-colors ${archived ? 'opacity-55' : ''}`}>
+                        <tr
+                          className={`group/trow transition-colors hover:bg-muted/20 ${archived ? 'opacity-60' : ''}`}
+                        >
+                          {/* Name + expand toggle */}
                           <td className="px-5 py-3.5">
-                            <div className="flex items-center gap-2.5">
-                              {/* Version expand toggle */}
-                              <button
-                                className={`shrink-0 text-muted-foreground hover:text-foreground transition-colors ${!hasOthers ? 'invisible pointer-events-none' : ''}`}
-                                onClick={() => toggleFamily(primary.id)}
-                                aria-label={expanded ? 'Collapse versions' : 'Expand versions'}
-                              >
-                                <ChevronDown size={14} className={`transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
-                              </button>
-                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                                <FileText size={14} className="text-primary" />
-                              </div>
-                              <div className="min-w-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {hasOthers && (
                                 <button
-                                  className="font-medium text-foreground hover:text-primary truncate max-w-[200px] text-left transition-colors"
-                                  onClick={() => navigate(`/templates/${primary.id}/builder`)}
+                                  onClick={() => toggleFamily(primary.id)}
+                                  className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                  <ChevronDown
+                                    size={14}
+                                    className={`transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
+                                  />
+                                </button>
+                              )}
+                              <div className="min-w-0">
+                                <Link
+                                  to={`/templates/${primary.id}/builder`}
+                                  className="text-sm font-semibold text-foreground hover:text-primary transition-colors truncate block"
                                 >
                                   {primary.name}
-                                </button>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <span className="text-[10px] text-muted-foreground font-mono">{primary.code}</span>
-                                  {primary.assessmentType && (
-                                    <span className="text-[10px] text-muted-foreground">· {primary.assessmentType}</span>
-                                  )}
-                                  {hasOthers && (
-                                    <span className="text-[10px] font-semibold text-primary/70 cursor-pointer" onClick={() => toggleFamily(primary.id)}>
-                                      {others.length + 1} versions
-                                    </span>
-                                  )}
-                                </div>
+                                </Link>
+                                {primary.description && (
+                                  <p className="text-[11px] text-muted-foreground truncate mt-0.5 max-w-xs">
+                                    {primary.description}
+                                  </p>
+                                )}
                               </div>
                             </div>
                           </td>
+                          {/* Version */}
                           <td className="px-5 py-3.5 hidden sm:table-cell">
-                            <span className="text-muted-foreground font-mono text-xs">v{primary.version}</span>
+                            <span className="text-xs font-mono text-muted-foreground">v{primary.version}</span>
                           </td>
+                          {/* Status */}
                           <td className="px-5 py-3.5">
-                            <div className="flex items-center gap-1.5">
-                              <div className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[primary.status]}`} />
-                              <Badge variant={STATUS_VARIANT[primary.status]}>{primary.status}</Badge>
-                            </div>
+                            <Badge variant={STATUS_VARIANT[primary.status]} className="text-[10px]">
+                              <span className={`mr-1 h-1.5 w-1.5 rounded-full inline-block ${STATUS_DOT[primary.status]}`} />
+                              {primary.status}
+                            </Badge>
                           </td>
-                          <td className="px-5 py-3.5 text-right text-muted-foreground hidden md:table-cell">
-                            {primary.questionCount}
+                          {/* Question count */}
+                          <td className="px-5 py-3.5 text-right text-xs text-muted-foreground hidden md:table-cell">
+                            {primary.questionCount ?? 0}
                           </td>
-                          <td className="px-5 py-3.5 text-muted-foreground hidden lg:table-cell">
+                          {/* Created by */}
+                          <td className="px-5 py-3.5 text-xs text-muted-foreground hidden lg:table-cell">
                             {userName(primary.createdBy)}
                           </td>
-                          <td className="px-5 py-3.5 text-muted-foreground hidden lg:table-cell">
+                          {/* Last modified */}
+                          <td className="px-5 py-3.5 text-xs text-muted-foreground hidden lg:table-cell">
                             {formatDate(primary.updatedAt)}
                           </td>
-                          <td className="px-5 py-3.5">
-                            <div className="flex items-center justify-end gap-1">
-                              {!archived && (
-                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => navigate(`/templates/${primary.id}/builder`)}>
-                                  Open Builder <ArrowRight size={12} />
-                                </Button>
-                              )}
+                          {/* Actions */}
+                          <td className="px-5 py-3.5 text-right">
+                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover/trow:opacity-100 transition-opacity">
                               {canManage && (
                                 <>
                                   <Tooltip>
                                     <TooltipTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleClone(primary)}>
+                                      <button
+                                        onClick={() => handleClone(primary)}
+                                        className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                      >
                                         <Copy size={13} />
-                                      </Button>
+                                      </button>
                                     </TooltipTrigger>
-                                    <TooltipContent>Clone (independent copy)</TooltipContent>
+                                    <TooltipContent>Clone</TooltipContent>
                                   </Tooltip>
                                   <Tooltip>
                                     <TooltipTrigger asChild>
-                                      <Button
-                                        variant="ghost" size="icon"
-                                        className={`h-7 w-7 ${archived ? 'text-emerald-600 hover:text-emerald-700' : 'text-muted-foreground'}`}
+                                      <button
                                         onClick={() => handleToggleArchive(primary)}
+                                        className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                                       >
                                         {archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
-                                      </Button>
+                                      </button>
                                     </TooltipTrigger>
                                     <TooltipContent>{archived ? 'Restore' : 'Archive'}</TooltipContent>
                                   </Tooltip>
                                 </>
                               )}
+                              <Link
+                                to={`/templates/${primary.id}/builder`}
+                                className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <ArrowRight size={13} />
+                              </Link>
                             </div>
                           </td>
                         </tr>
 
-                        {/* ── Expanded version rows ── */}
-                        {expanded && others.map(tpl => {
-                          const tplArchived = tpl.status === 'Archived';
-                          return (
-                            <tr key={tpl.id} className={`bg-muted/10 hover:bg-muted/20 transition-colors ${tplArchived ? 'opacity-55' : ''}`}>
-                              <td className="pl-14 pr-5 py-2.5">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-3 h-4 border-l-2 border-b-2 border-muted-foreground/25 rounded-bl shrink-0" style={{ marginTop: '-8px' }} />
-                                  <span className={`text-xs font-mono font-medium ${tplArchived ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-                                    v{tpl.version}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="px-5 py-2.5 hidden sm:table-cell" />
-                              <td className="px-5 py-2.5">
-                                <div className="flex items-center gap-1.5">
-                                  <div className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[tpl.status]}`} />
-                                  <Badge variant={STATUS_VARIANT[tpl.status]}>{tpl.status}</Badge>
-                                </div>
-                              </td>
-                              <td className="px-5 py-2.5 hidden md:table-cell" />
-                              <td className="px-5 py-2.5 hidden lg:table-cell" />
-                              <td className="px-5 py-2.5 text-[11px] text-muted-foreground hidden lg:table-cell">
-                                {formatDate(tpl.createdAt)}
-                              </td>
-                              <td className="px-5 py-2.5">
-                                <div className="flex justify-end">
-                                  {!tplArchived && (
-                                    <Button size="sm" variant="ghost" className="h-6 text-xs gap-1" onClick={() => navigate(`/templates/${tpl.id}/builder`)}>
-                                      Open Builder <ArrowRight size={11} />
-                                    </Button>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {/* ── Child version rows (expanded) ── */}
+                        {expanded && others.map(tpl => (
+                          <tr key={tpl.id} className="bg-muted/10 hover:bg-muted/20 transition-colors">
+                            <td className="pl-12 pr-5 py-2.5">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-px h-4 bg-border shrink-0" />
+                                <Link
+                                  to={`/templates/${tpl.id}/builder`}
+                                  className="text-xs font-medium text-muted-foreground hover:text-foreground truncate block"
+                                >
+                                  {tpl.name}
+                                </Link>
+                              </div>
+                            </td>
+                            <td className="px-5 py-2.5 hidden sm:table-cell">
+                              <span className="text-xs font-mono text-muted-foreground">v{tpl.version}</span>
+                            </td>
+                            <td className="px-5 py-2.5">
+                              <Badge variant={STATUS_VARIANT[tpl.status]} className="text-[10px]">
+                                <span className={`mr-1 h-1.5 w-1.5 rounded-full inline-block ${STATUS_DOT[tpl.status]}`} />
+                                {tpl.status}
+                              </Badge>
+                            </td>
+                            <td className="px-5 py-2.5 text-right text-xs text-muted-foreground hidden md:table-cell">
+                              {tpl.questionCount ?? 0}
+                            </td>
+                            <td className="px-5 py-2.5 hidden lg:table-cell" />
+                            <td className="px-5 py-2.5 text-xs text-muted-foreground hidden lg:table-cell">
+                              {formatDate(tpl.updatedAt)}
+                            </td>
+                            <td className="px-5 py-2.5 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                {canManage && (
+                                  <>
+                                    <button
+                                      onClick={() => handleClone(tpl)}
+                                      className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                      <Copy size={13} />
+                                    </button>
+                                    <button
+                                      onClick={() => handleToggleArchive(tpl)}
+                                      className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                    >
+                                      {tpl.status === 'Archived' ? <ArchiveRestore size={13} /> : <Archive size={13} />}
+                                    </button>
+                                  </>
+                                )}
+                                <Link
+                                  to={`/templates/${tpl.id}/builder`}
+                                  className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                  <ArrowRight size={13} />
+                                </Link>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
                       </Fragment>
                     );
                   })}
@@ -484,30 +540,101 @@ export function TemplateList() {
               </table>
             </div>
           )}
-          <div className="border-t bg-muted/20 px-5 py-2.5 text-xs text-muted-foreground">
-            {visibleFamilies.length} template{visibleFamilies.length !== 1 ? 's' : ''} shown
-            {archivedCount > 0 && !showArchived && ` · ${archivedCount} archived`}
-          </div>
         </Card>
 
-        {/* Archive confirm dialog */}
-        {confirmArchive && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl space-y-4">
-              <h3 className="text-sm font-semibold text-foreground">Archive "{confirmArchive.name}"?</h3>
-              <p className="text-sm text-muted-foreground">
-                Archived templates cannot be used in new events. Existing events are unaffected. You can restore it later.
-              </p>
-              <div className="flex justify-end gap-3">
-                <Button variant="outline" size="sm" onClick={() => setConfirmArchive(null)}>Cancel</Button>
-                <Button variant="destructive" size="sm" onClick={confirmDoArchive}>Archive Template</Button>
-              </div>
-            </div>
-          </div>
+        {/* Show / hide archived toggle (bottom) */}
+        {archivedCount > 0 && (
+          <button
+            onClick={() => setShowArchived(v => !v)}
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronDown size={15} className={`transition-transform duration-200 ${showArchived ? 'rotate-180' : ''}`} />
+            {showArchived ? 'Hide' : 'Show'} archived ({archivedCount})
+          </button>
         )}
-
-        <TplSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onSave={handleCreate} />
       </div>
+
+      {/* ── Confirm archive dialog ── */}
+      <Dialog open={confirmArchive !== null} onOpenChange={open => !open && setConfirmArchive(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Archive Template</DialogTitle>
+            <DialogDescription>
+              Archiving <strong>{confirmArchive?.name}</strong> will prevent new events from using it.
+              Existing events are unaffected.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+            <Button variant="destructive" onClick={confirmDoArchive}>Archive</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Framework picker dialog ── */}
+      <FrameworkPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onConfirm={handlePickerConfirm}
+      />
     </TooltipProvider>
+  );
+}
+
+// ── Framework Picker Dialog ───────────────────────────────────────────────────
+
+function FrameworkPickerDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onConfirm: (frameworkId: string) => void;
+}) {
+  const [selected, setSelected] = useState<string>('');
+  const frameworks = getFrameworks();
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Choose Assessment Framework</DialogTitle>
+          <DialogDescription>Select the framework that defines scoring rules and question types for this template.</DialogDescription>
+        </DialogHeader>
+        <div className="px-6 pb-4 space-y-2 max-h-72 overflow-y-auto">
+          {frameworks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No frameworks configured yet.</p>
+          ) : frameworks.map(fw => (
+            <button
+              key={fw.id}
+              onClick={() => setSelected(fw.id)}
+              className={`w-full text-left rounded-xl border p-4 transition-colors ${
+                selected === fw.id
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:bg-muted/40'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{fw.name}</p>
+                  {fw.description && <p className="text-xs text-muted-foreground mt-0.5">{fw.description}</p>}
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Scoring: {scoringMethodLabel(fw.scoringMethod)} &middot; {fw.maturityLevels.length} maturity levels
+                  </p>
+                </div>
+                {selected === fw.id && <CheckCircle2 size={16} className="text-primary shrink-0" />}
+              </div>
+            </button>
+          ))}
+        </div>
+        <DialogFooter>
+          <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+          <Button onClick={() => selected && onConfirm(selected)} disabled={!selected}>
+            Create Template
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

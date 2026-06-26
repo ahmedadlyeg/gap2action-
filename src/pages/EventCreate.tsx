@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
-import { ArrowLeft, Users, Search, X, Check, Send, UserCheck, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Users, Search, X, Check, Send, UserCheck, AlertCircle, LayoutGrid, Rocket } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,7 +17,8 @@ import {
 import {
   users, departments, userGroups,
 } from '@/services/mockData';
-import { saveEvent, getTemplates, getTemplateSections } from '@/services/store';
+import { saveEvent, getTemplates, getTemplateSections, getTemplate, getFramework } from '@/services/store';
+import { scoringMethodLabel } from './FrameworkList';
 import type { AssessmentEvent, MaturityLevel, EventStatus, BuilderSection } from '@/types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -278,6 +279,7 @@ export function EventCreate() {
       })),
       completionRate: 0,
       createdAt: new Date().toISOString(),
+      frameworkId: selectedFramework?.id,
     };
     saveEvent(draft);
     navigate('/');
@@ -316,6 +318,7 @@ export function EventCreate() {
       })),
       completionRate: 0,
       createdAt: new Date().toISOString(),
+      frameworkId: selectedFramework?.id,
     };
     saveEvent(newEvent);
     setLaunched(true);
@@ -327,8 +330,12 @@ export function EventCreate() {
   };
 
   const selectedTemplate = activeTemplatesForPicker.find(t => t.id === form.templateId);
+  const selectedTemplateWithFramework = form.templateId ? getTemplate(form.templateId) : undefined;
+  const selectedFramework = selectedTemplateWithFramework?.frameworkId
+    ? getFramework(selectedTemplateWithFramework.frameworkId) : undefined;
 
   return (
+    <>
     <div className="min-h-full bg-background">
       {/* Header */}
       <div className="border-b bg-background px-8 py-5 sticky top-0 z-10">
@@ -396,6 +403,27 @@ export function EventCreate() {
                   <p className="text-xs text-muted-foreground">
                     {selectedTemplate.questionCount} questions · {selectedTemplate.assessmentType ?? 'Maturity'} type
                   </p>
+                )}
+                {selectedFramework && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2 mt-2">
+                    <div className="flex items-center gap-2">
+                      <LayoutGrid size={14} className="text-slate-600" />
+                      <span className="font-semibold text-sm text-slate-700">{selectedFramework.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5">
+                        Scoring: {scoringMethodLabel(selectedFramework.scoringMethod)}
+                      </span>
+                      <span className="text-xs bg-slate-100 text-slate-600 border border-slate-200 rounded-full px-2 py-0.5">
+                        {selectedFramework.allowedQuestionTypes.length} question types
+                      </span>
+                    </div>
+                    {selectedFramework.scoringMethod !== 'weighted_section' && (
+                      <p className="text-xs text-amber-700">
+                        This framework uses {scoringMethodLabel(selectedFramework.scoringMethod)} scoring. Final scores are calculated at submission time.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -524,7 +552,7 @@ export function EventCreate() {
                           id={u.id}
                           label={u.name}
                           sub={`${u.department ?? '—'} · ${u.role}`}
-                          checked={directIds.has(u.id)}
+                          checked={directIds.has(u.id) || (resolvedIds.includes(u.id) && !directIds.has(u.id))}
                           onChange={checked => toggleUser(u.id, checked)}
                         />
                       ))
@@ -546,231 +574,160 @@ export function EventCreate() {
                 {respTab === 'depts' && (
                   filteredDepts.length === 0
                     ? <p className="text-xs text-muted-foreground text-center py-4">No departments found.</p>
-                    : filteredDepts.map(d => {
-                        const count = activeUsers.filter(u => u.department === d.name).length;
-                        return (
-                          <CheckItem
-                            key={d.id}
-                            id={d.id}
-                            label={d.name}
-                            sub={`${count} active user${count !== 1 ? 's' : ''}`}
-                            checked={deptIds.has(d.name)}
-                            onChange={checked => toggleDept(d.name, checked)}
-                          />
-                        );
-                      })
+                    : filteredDepts.map(d => (
+                        <CheckItem
+                          key={d.id}
+                          id={d.name}
+                          label={d.name}
+                          sub={`${activeUsers.filter(u => u.department === d.name).length} user${activeUsers.filter(u => u.department === d.name).length !== 1 ? 's' : ''}`}
+                          checked={deptIds.has(d.name)}
+                          onChange={checked => toggleDept(d.name, checked)}
+                        />
+                      ))
                 )}
               </div>
-            </div>
 
-            {/* Summary panel */}
-            {resolvedUsers.length > 0 && (
-              <div className="rounded-xl border bg-card overflow-hidden">
-                <div className="flex items-center gap-2 px-5 py-3 border-b">
-                  <UserCheck size={14} className="text-emerald-600" />
-                  <span className="text-xs font-semibold text-foreground">
-                    {resolvedUsers.length} respondent{resolvedUsers.length !== 1 ? 's' : ''} selected
-                  </span>
-                </div>
-                <ul className="max-h-52 overflow-y-auto p-2 space-y-0.5">
-                  {resolvedUsers.map(u => (
-                    <li key={u.id} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 group hover:bg-muted/50">
-                      <UserAvatar name={u.name} initials={u.initials} size="xs" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-foreground truncate">{u.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{u.department ?? '—'}</p>
-                      </div>
-                      <button
-                        onClick={() => removeResolved(u.id)}
-                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-                      >
-                        <X size={13} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Step 3: Section Assignment ── */}
-        {form.templateId && (
-          <div className="mt-8 rounded-xl border bg-card p-6 space-y-5">
-            {/* Toggle header */}
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">Section Assignment</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {useSectionAssignment
-                    ? 'Each section can have a different subset of respondents.'
-                    : 'All respondents will answer all sections.'}
-                </p>
-              </div>
-              <label className="flex items-center gap-2.5 cursor-pointer select-none shrink-0">
-                <span className="text-xs text-muted-foreground">Assign respondents to specific sections</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={useSectionAssignment}
-                  onClick={handleToggleSectionAssignment}
-                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                    useSectionAssignment ? 'bg-primary' : 'bg-input'
-                  }`}
-                >
-                  <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-                    useSectionAssignment ? 'translate-x-4' : 'translate-x-0'
-                  }`} />
-                </button>
-              </label>
-            </div>
-
-            {/* Per-section assignment panel */}
-            {useSectionAssignment && (
-              templateSections.length === 0
-                ? (
-                  <p className="text-xs text-muted-foreground italic">
-                    No sections found for this template. Save at least one section in the builder first.
+              {/* Selected summary */}
+              {resolvedUsers.length > 0 && (
+                <div className="border-t px-4 py-3 bg-muted/20">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Selected ({resolvedUsers.length})
                   </p>
-                )
-                : (
-                  <div className="space-y-4">
-                    {templateSections.map(section => {
-                      const assigned = sectionAssignments[section.id] ?? new Set<string>();
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                    {resolvedUsers.map(u => (
+                      <span
+                        key={u.id}
+                        className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary text-[11px] font-medium px-2 py-0.5"
+                      >
+                        {u.name}
+                        <button
+                          type="button"
+                          onClick={() => setExcludedIds(prev => { const s = new Set(prev); s.add(u.id); return s; })}
+                          className="ml-0.5 rounded-full hover:bg-primary/20 transition-colors"
+                        >
+                          <X size={10} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Section Assignment (optional) ── */}
+            {templateSections.length > 1 && resolvedIds.length > 0 && (
+              <div className="rounded-xl border bg-card overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Section Assignment</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Optionally assign different respondents to each section.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <span className="text-xs text-muted-foreground">Enable</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={useSectionAssignment}
+                      onClick={handleToggleSectionAssignment}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                        useSectionAssignment ? 'bg-primary' : 'bg-muted'
+                      }`}
+                    >
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                        useSectionAssignment ? 'translate-x-4' : 'translate-x-1'
+                      }`} />
+                    </button>
+                  </label>
+                </div>
+
+                {useSectionAssignment && (
+                  <div className="divide-y">
+                    {templateSections.map(sec => {
+                      const assigned = sectionAssignments[sec.id] ?? new Set<string>();
                       const hasError = assigned.size === 0;
                       return (
-                        <div
-                          key={section.id}
-                          className={`rounded-lg border p-4 space-y-3 transition-colors ${
-                            hasError ? 'border-destructive/50 bg-destructive/5' : 'border-border'
-                          }`}
-                        >
-                          {/* Section header */}
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold text-foreground">{section.name}</p>
-                              {section.description && (
-                                <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
-                                  {section.description}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
+                        <div key={sec.id} className={`p-4 space-y-2 ${hasError ? 'bg-red-50/40' : ''}`}>
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium text-foreground">{sec.name}</p>
+                            <div className="flex items-center gap-2">
                               <button
                                 type="button"
-                                onClick={() => setAllForSection(section.id)}
-                                className="text-[10px] text-primary hover:underline"
-                              >
-                                Select All
-                              </button>
-                              <span className="text-muted-foreground/40 text-[10px]">·</span>
+                                onClick={() => setAllForSection(sec.id)}
+                                className="text-[11px] text-primary hover:underline"
+                              >All</button>
+                              <span className="text-muted-foreground/40">·</span>
                               <button
                                 type="button"
-                                onClick={() => clearSection(section.id)}
-                                className="text-[10px] text-muted-foreground hover:text-foreground hover:underline"
-                              >
-                                Clear All
-                              </button>
+                                onClick={() => clearSection(sec.id)}
+                                className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                              >None</button>
                             </div>
                           </div>
-
-                          {/* Respondent chips */}
-                          {resolvedUsers.length === 0 ? (
-                            <p className="text-[10px] text-muted-foreground italic">
-                              No respondents selected — add respondents in Step 2 first.
-                            </p>
-                          ) : (
-                            <div className="flex flex-wrap gap-1.5">
-                              {resolvedUsers.map(u => {
-                                const isAssigned = assigned.has(u.id);
-                                return (
-                                  <button
-                                    key={u.id}
-                                    type="button"
-                                    onClick={() => toggleSectionUser(section.id, u.id)}
-                                    className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors ${
-                                      isAssigned
-                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                                        : 'bg-muted text-muted-foreground border-input hover:bg-muted/70'
-                                    }`}
-                                  >
-                                    <span className="font-mono">{u.initials}</span>
-                                    <span>{u.name.split(' ')[0]}</span>
-                                    {isAssigned && <Check size={10} className="text-emerald-700" strokeWidth={2.5} />}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {/* Per-section error */}
                           {hasError && (
-                            <p className="flex items-center gap-1 text-[10px] font-medium text-destructive">
-                              <AlertCircle size={10} /> At least 1 respondent required
-                            </p>
+                            <p className="text-xs text-destructive">At least one respondent is required.</p>
                           )}
+                          <div className="flex flex-wrap gap-1.5">
+                            {resolvedUsers.map(u => {
+                              const on = assigned.has(u.id);
+                              return (
+                                <button
+                                  key={u.id}
+                                  type="button"
+                                  onClick={() => toggleSectionUser(sec.id, u.id)}
+                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                                    on
+                                      ? 'bg-primary text-white border-primary'
+                                      : 'bg-background text-muted-foreground border-input hover:border-primary/50 hover:text-foreground'
+                                  }`}
+                                >
+                                  {u.name}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       );
                     })}
                   </div>
-                )
+                )}
+              </div>
             )}
           </div>
-        )}
+        </div>
       </div>
-
-      {/* ── Launch Confirmation Dialog ── */}
-      <Dialog open={confirmOpen} onOpenChange={v => { if (!launched) setConfirmOpen(v); }}>
-        <DialogContent hideClose>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
-              <Send size={16} className="text-primary" />
-              Launch Assessment Event?
-            </DialogTitle>
-            <DialogDescription asChild>
-              <div className="space-y-3 mt-2">
-                <div className="rounded-lg bg-muted/50 border px-4 py-3 space-y-1">
-                  <p className="text-sm font-medium text-foreground">{form.name}</p>
-                  {selectedTemplate && (
-                    <p className="text-xs text-muted-foreground">
-                      {selectedTemplate.name} · v{selectedTemplate.version}
-                    </p>
-                  )}
-                  {form.startDate && form.endDate && (
-                    <p className="text-xs text-muted-foreground">
-                      {form.startDate} → {form.endDate}
-                    </p>
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {resolvedUsers.length > 0
-                    ? `Email notifications will be sent to ${resolvedUsers.length} respondent${resolvedUsers.length !== 1 ? 's' : ''} inviting them to complete the assessment.`
-                    : 'No respondents have been assigned. You can add them after launching.'}
-                </p>
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  The event status will be set to <strong>Open</strong> and respondents will be notified immediately.
-                </p>
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            {!launched ? (
-              <>
-                <DialogClose asChild>
-                  <Button variant="outline" size="sm">Cancel</Button>
-                </DialogClose>
-                <Button size="sm" onClick={handleConfirmLaunch}>
-                  <Send size={13} className="mr-1.5" /> Launch Now
-                </Button>
-              </>
-            ) : (
-              <div className="flex items-center gap-2 text-sm text-emerald-700 font-medium py-1">
-                <Check size={16} /> Event launched — redirecting…
-              </div>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
+
+    {/* ── Launch Confirm Dialog ── */}
+    <Dialog open={confirmOpen} onOpenChange={v => !launched && setConfirmOpen(v)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Rocket size={16} className="text-primary" />
+            Launch Assessment Event?
+          </DialogTitle>
+          <DialogDescription>
+            This will open the event to respondents immediately. Make sure all details are correct before continuing.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="px-6 pb-2 space-y-1 text-sm text-muted-foreground">
+          <p><span className="font-semibold text-foreground">Event: </span>{form.name}</p>
+          <p><span className="font-semibold text-foreground">Template: </span>{activeTemplatesForPicker.find(t => t.id === form.templateId)?.name ?? '—'}</p>
+          <p><span className="font-semibold text-foreground">Respondents: </span>{resolvedIds.length}</p>
+        </div>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" disabled={launched}>Cancel</Button>
+          </DialogClose>
+          <Button onClick={handleConfirmLaunch} disabled={launched} className="gap-2">
+            {launched
+              ? <><Check size={14} /> Launched!</>
+              : <><Rocket size={14} /> Confirm Launch</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

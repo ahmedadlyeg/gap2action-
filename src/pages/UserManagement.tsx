@@ -823,16 +823,15 @@ export function UserManagement() {
       const { rows, errors, warnings } = parseDepartmentsCSV(text);
       const existingNames = new Set(localDepts.map(d => d.name.toLowerCase()));
       const newCount = rows.filter(r => !existingNames.has(r.name.toLowerCase())).length;
-      const conflictCount = rows.length - newCount;
-      setActiveImport({
-        entityType: 'departments',
-        errors, warnings,
-        deptRows: rows,
-        preview: {
-          total: rows.length, newCount, conflictCount,
-          rows: rows.map(r => ({ label: r.name, isNew: !existingNames.has(r.name.toLowerCase()) })),
-        },
-      });
+      const preview: ImportPreview = {
+        totalRows: rows.length,
+        validRows: rows.length - errors.filter(e => e.startsWith('Row')).length,
+        newItems: newCount,
+        updatedItems: rows.length - newCount,
+        columns: ['Name'],
+        sampleRows: rows.slice(0, 5).map(r => [r.name]),
+      };
+      setActiveImport({ entityType: 'departments', errors, warnings, preview, deptRows: rows });
     };
     reader.readAsText(file);
   };
@@ -844,16 +843,15 @@ export function UserManagement() {
       const { rows, errors, warnings } = parseUsersCSV(text);
       const existingEmails = new Set(localUsers.map(u => u.email.toLowerCase()));
       const newCount = rows.filter(r => !existingEmails.has(r.email.toLowerCase())).length;
-      const conflictCount = rows.length - newCount;
-      setActiveImport({
-        entityType: 'users',
-        errors, warnings,
-        userRows: rows,
-        preview: {
-          total: rows.length, newCount, conflictCount,
-          rows: rows.map(r => ({ label: `${r.name} (${r.email})`, isNew: !existingEmails.has(r.email.toLowerCase()) })),
-        },
-      });
+      const preview: ImportPreview = {
+        totalRows: rows.length,
+        validRows: rows.length - errors.filter(e => e.startsWith('Row')).length,
+        newItems: newCount,
+        updatedItems: rows.length - newCount,
+        columns: ['Name', 'Email', 'Role', 'Department', 'Status'],
+        sampleRows: rows.slice(0, 5).map(r => [r.name, r.email, r.role, r.department ?? '', r.status ?? 'Active']),
+      };
+      setActiveImport({ entityType: 'users', errors, warnings, preview, userRows: rows });
     };
     reader.readAsText(file);
   };
@@ -865,224 +863,148 @@ export function UserManagement() {
       const { rows, errors, warnings } = parseGroupsCSV(text);
       const existingNames = new Set(localGroups.map(g => g.name.toLowerCase()));
       const newCount = rows.filter(r => !existingNames.has(r.name.toLowerCase())).length;
-      const conflictCount = rows.length - newCount;
-      setActiveImport({
-        entityType: 'groups',
-        errors, warnings,
-        groupRows: rows,
-        preview: {
-          total: rows.length, newCount, conflictCount,
-          rows: rows.map(r => ({ label: r.name, isNew: !existingNames.has(r.name.toLowerCase()) })),
-        },
-      });
+      const preview: ImportPreview = {
+        totalRows: rows.length,
+        validRows: rows.length - errors.filter(e => e.startsWith('Row')).length,
+        newItems: newCount,
+        updatedItems: rows.length - newCount,
+        columns: ['Group Name', 'Members'],
+        sampleRows: rows.slice(0, 5).map(r => [r.name, r.memberEmails.slice(0, 3).join(', ') + (r.memberEmails.length > 3 ? '…' : '')]),
+      };
+      setActiveImport({ entityType: 'groups', errors, warnings, preview, groupRows: rows });
     };
     reader.readAsText(file);
   };
 
-  // ─── Import confirm ───────────────────────────────────────────────────────
-
-  const handleImportConfirm = (mode: 'skip' | 'update') => {
+  const handleConfirmImport = () => {
     if (!activeImport) return;
-
     if (activeImport.entityType === 'departments' && activeImport.deptRows) {
-      let count = 0;
-      for (const row of activeImport.deptRows) {
-        const existing = localDepts.find(d => d.name.toLowerCase() === row.name.toLowerCase());
-        if (!existing) {
-          saveDepartment({ id: crypto.randomUUID(), name: row.name });
-          count++;
-        } else if (mode === 'update') {
-          saveDepartment({ ...existing, name: row.name });
-          count++;
+      const existingNames = new Set(localDepts.map(d => d.name.toLowerCase()));
+      activeImport.deptRows.forEach(r => {
+        if (!existingNames.has(r.name.toLowerCase())) {
+          saveDepartment({ id: crypto.randomUUID(), name: r.name });
         }
-      }
+      });
       setLocalDepts(getDepartments());
-      toast({ title: `Imported ${count} department${count !== 1 ? 's' : ''}.`, variant: 'success' });
-    }
-
-    if (activeImport.entityType === 'users' && activeImport.userRows) {
-      let count = 0;
-      // Take a snapshot of current state so lookups are consistent across rows
-      let currentDepts = getDepartments();
-      let currentGroups = getGroups();
-      let currentUsers = getUsers();
-
-      for (const row of activeImport.userRows) {
-        // Step A — ensure department exists
-        if (row.department && !currentDepts.find(d => d.name === row.department)) {
-          saveDepartment({ id: crypto.randomUUID(), name: row.department });
-          currentDepts = getDepartments();
-        }
-
-        // Step B — ensure groups exist
-        for (const groupName of row.groups) {
-          if (!currentGroups.find(g => g.name === groupName)) {
-            saveGroup({ id: crypto.randomUUID(), name: groupName, memberIds: [] });
-            currentGroups = getGroups();
-          }
-        }
-
-        // Step C — resolve group IDs
-        const groupIds = row.groups
-          .map(gn => currentGroups.find(g => g.name === gn)?.id)
-          .filter((id): id is string => !!id);
-
-        const existing = currentUsers.find(u => u.email.toLowerCase() === row.email.toLowerCase());
-
-        let userId: string;
-        if (!existing) {
-          const newUser: User = {
-            id: crypto.randomUUID(),
-            name: row.name,
-            email: row.email,
-            role: row.role,
-            status: row.status,
-            department: row.department || undefined,
-            groupIds,
-            initials: getInitials(row.name),
-          };
-          saveUser(newUser);
-          userId = newUser.id;
-          currentUsers = getUsers();
-          count++;
-        } else if (mode === 'update') {
-          const updated = { ...existing, name: row.name, role: row.role, status: row.status, department: row.department || undefined, groupIds };
-          saveUser(updated);
-          userId = existing.id;
-          currentUsers = getUsers();
-          count++;
-        } else {
-          continue;
-        }
-
-        // Step D — add user to groups
-        for (const groupName of row.groups) {
-          const group = currentGroups.find(g => g.name === groupName);
-          if (group && !group.memberIds.includes(userId)) {
-            const updated = { ...group, memberIds: [...group.memberIds, userId] };
-            saveGroup(updated);
-            currentGroups = getGroups();
-          }
-        }
-      }
-
+      toast({ title: 'Departments imported', description: `${activeImport.deptRows.length} processed.` });
+    } else if (activeImport.entityType === 'users' && activeImport.userRows) {
+      const emailMap = new Map(localUsers.map(u => [u.email.toLowerCase(), u]));
+      activeImport.userRows.forEach(r => {
+        const existing = emailMap.get(r.email.toLowerCase());
+        const user: import('@/types').User = {
+          id: existing?.id ?? crypto.randomUUID(),
+          name: r.name,
+          email: r.email,
+          role: (r.role as import('@/types').UserRole) ?? 'respondent',
+          status: (r.status as import('@/types').UserStatus) ?? 'Active',
+          department: r.department || undefined,
+          groupIds: existing?.groupIds ?? [],
+          initials: getInitials(r.name),
+        };
+        saveUser(user);
+      });
       setLocalUsers(getUsers());
-      setLocalDepts(getDepartments());
-      setLocalGroups(getGroups());
-      toast({ title: `Imported ${count} user${count !== 1 ? 's' : ''}.`, variant: 'success' });
-    }
-
-    if (activeImport.entityType === 'groups' && activeImport.groupRows) {
-      let count = 0;
-      let warnedCount = 0;
-      let currentGroups = getGroups();
-      const currentUsers = getUsers();
-
-      for (const row of activeImport.groupRows) {
-        // Resolve member IDs from emails
-        const resolvedIds: string[] = [];
-        for (const email of row.members) {
-          const u = currentUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
-          if (u) resolvedIds.push(u.id);
-          else warnedCount++;
-        }
-
-        const existing = currentGroups.find(g => g.name.toLowerCase() === row.name.toLowerCase());
-
-        if (!existing) {
-          saveGroup({ id: crypto.randomUUID(), name: row.name, memberIds: resolvedIds });
-          currentGroups = getGroups();
-          count++;
-        } else if (mode === 'update') {
-          saveGroup({ ...existing, memberIds: resolvedIds });
-          currentGroups = getGroups();
-          count++;
-        } else {
-          // skip mode — add only new members
-          const newMemberIds = resolvedIds.filter(id => !existing.memberIds.includes(id));
-          if (newMemberIds.length > 0) {
-            saveGroup({ ...existing, memberIds: [...existing.memberIds, ...newMemberIds] });
-            currentGroups = getGroups();
+      toast({ title: 'Users imported', description: `${activeImport.userRows.length} processed.` });
+    } else if (activeImport.entityType === 'groups' && activeImport.groupRows) {
+      const emailToUser = new Map(localUsers.map(u => [u.email.toLowerCase(), u]));
+      activeImport.groupRows.forEach(r => {
+        const memberIds = r.memberEmails
+          .map(e => emailToUser.get(e.toLowerCase())?.id)
+          .filter((id): id is string => Boolean(id));
+        const existing = localGroups.find(g => g.name.toLowerCase() === r.name.toLowerCase());
+        const group: import('@/types').UserGroup = {
+          id: existing?.id ?? crypto.randomUUID(),
+          name: r.name,
+          memberIds,
+        };
+        saveGroup(group);
+        memberIds.forEach(uid => {
+          const u = localUsers.find(x => x.id === uid);
+          if (u && !(u.groupIds ?? []).includes(group.id)) {
+            saveUser({ ...u, groupIds: [...(u.groupIds ?? []), group.id] });
           }
-          count++;
-        }
-      }
-
+        });
+      });
       setLocalGroups(getGroups());
-      const warnMsg = warnedCount > 0 ? ` ${warnedCount} member email${warnedCount !== 1 ? 's' : ''} not found.` : '';
-      toast({ title: `Imported ${count} group${count !== 1 ? 's' : ''}.${warnMsg}`, variant: warnedCount > 0 ? 'warning' : 'success' });
+      setLocalUsers(getUsers());
+      toast({ title: 'Groups imported', description: `${activeImport.groupRows.length} processed.` });
     }
-
     setActiveImport(null);
   };
 
+  const handleDownloadDeptTemplate = () => downloadBlob(generateDepartmentsTemplate(), 'departments_template.csv');
+  const handleDownloadUserTemplate = () => downloadBlob(generateUsersTemplate(), 'users_template.csv');
+  const handleDownloadGroupTemplate = () => downloadBlob(generateGroupsTemplate(), 'groups_template.csv');
+
   return (
-    <TooltipProvider delayDuration={300}>
-      <div className="p-8 max-w-6xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">User Management</h1>
-            <p className="text-sm text-muted-foreground mt-1">Manage users, departments, and groups across the platform.</p>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted rounded-lg px-3 py-1.5">
-            <GripVertical size={13} />
-            {localUsers.filter(u => u.status === 'Active').length} active · {localUsers.filter(u => u.status === 'Inactive').length} inactive
-          </div>
+    <div className="p-8 max-w-6xl mx-auto space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">User Management</h1>
+          <p className="text-sm text-muted-foreground mt-1">Manage users, departments, and groups.</p>
         </div>
-
-        {/* Tabs */}
-        <Tabs value={tab} onValueChange={v => setTab(v as Tab)}>
-          <TabsList>
-            <TabsTrigger value="users" activeValue={tab} onSelect={v => setTab(v as Tab)}>Users ({localUsers.length})</TabsTrigger>
-            <TabsTrigger value="departments" activeValue={tab} onSelect={v => setTab(v as Tab)}>Departments ({localDepts.length})</TabsTrigger>
-            <TabsTrigger value="groups" activeValue={tab} onSelect={v => setTab(v as Tab)}>User Groups ({localGroups.length})</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="users" activeValue={tab}>
-            <UsersTab
-              users={localUsers} groups={localGroups} deptNames={deptNames}
-              isAdmin={isAdmin}
-              onAdd={addUser} onEdit={editUser} onToggleStatus={toggleStatus}
-              onImportFile={handleUserImportFile}
-              onDownloadTemplate={() => downloadBlob(generateUsersTemplate(), 'gap2action_users_template.csv')}
-            />
-          </TabsContent>
-
-          <TabsContent value="departments" activeValue={tab}>
-            <DepartmentsTab
-              departments={localDepts} users={localUsers}
-              isAdmin={isAdmin}
-              onAdd={addDept} onRename={renameDept} onDelete={deleteDept}
-              onImportFile={handleDeptImportFile}
-              onDownloadTemplate={() => downloadBlob(generateDepartmentsTemplate(), 'gap2action_departments_template.csv')}
-            />
-          </TabsContent>
-
-          <TabsContent value="groups" activeValue={tab}>
-            <GroupsTab
-              groups={localGroups} allUsers={localUsers}
-              isAdmin={isAdmin}
-              onAdd={addGroup} onEdit={editGroup} onDelete={deleteGroup}
-              onImportFile={handleGroupImportFile}
-              onDownloadTemplate={() => downloadBlob(generateGroupsTemplate(), 'gap2action_groups_template.csv')}
-            />
-          </TabsContent>
-        </Tabs>
-
-        {/* Shared import preview modal */}
-        {activeImport && (
-          <ImportPreviewModal
-            open
-            onClose={() => setActiveImport(null)}
-            onConfirm={handleImportConfirm}
-            entityType={activeImport.entityType}
-            errors={activeImport.errors}
-            warnings={activeImport.warnings}
-            preview={activeImport.preview}
-          />
-        )}
       </div>
-    </TooltipProvider>
+
+      <Tabs value={tab} onValueChange={v => setTab(v as Tab)}>
+        <TabsList>
+          <TabsTrigger value="users">Users ({localUsers.length})</TabsTrigger>
+          <TabsTrigger value="departments">Departments ({localDepts.length})</TabsTrigger>
+          <TabsTrigger value="groups">Groups ({localGroups.length})</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="users" className="mt-4">
+          <UsersTab
+            users={localUsers}
+            groups={localGroups}
+            deptNames={deptNames}
+            isAdmin={isAdmin}
+            onAdd={addUser}
+            onEdit={editUser}
+            onToggleStatus={toggleStatus}
+            onImportFile={handleUserImportFile}
+            onDownloadTemplate={handleDownloadUserTemplate}
+          />
+        </TabsContent>
+
+        <TabsContent value="departments" className="mt-4">
+          <DepartmentsTab
+            departments={localDepts}
+            users={localUsers}
+            isAdmin={isAdmin}
+            onAdd={addDept}
+            onRename={renameDept}
+            onDelete={deleteDept}
+            onImportFile={handleDeptImportFile}
+            onDownloadTemplate={handleDownloadDeptTemplate}
+          />
+        </TabsContent>
+
+        <TabsContent value="groups" className="mt-4">
+          <GroupsTab
+            groups={localGroups}
+            allUsers={localUsers}
+            isAdmin={isAdmin}
+            onAdd={addGroup}
+            onEdit={editGroup}
+            onDelete={deleteGroup}
+            onImportFile={handleGroupImportFile}
+            onDownloadTemplate={handleDownloadGroupTemplate}
+          />
+        </TabsContent>
+      </Tabs>
+
+      {/* ── Import preview modal ── */}
+      {activeImport && (
+        <ImportPreviewModal
+          open={true}
+          onOpenChange={open => { if (!open) setActiveImport(null); }}
+          title={`Import ${activeImport.entityType.charAt(0).toUpperCase() + activeImport.entityType.slice(1)}`}
+          errors={activeImport.errors}
+          warnings={activeImport.warnings}
+          preview={activeImport.preview}
+          onConfirm={handleConfirmImport}
+        />
+      )}
+    </div>
   );
 }

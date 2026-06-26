@@ -1,6 +1,8 @@
 import type {
   AssessmentEvent,
+  AssessmentFramework,
   BuilderSection,
+  Category,
   Department,
   QuestionnaireSubmission,
   RespondentAction,
@@ -17,7 +19,7 @@ export interface TemplateMeta {
   maturityLevels: unknown[];
   targetScore: number;
 }
-import { events as seedEvents, templates as seedTemplates, users as seedUsers, departments as seedDepts, userGroups as seedGroups } from '@/services/mockData';
+import { events as seedEvents, templates as seedTemplates, users as seedUsers, departments as seedDepts, userGroups as seedGroups, frameworks as seedFrameworks, categories as seedCategories } from '@/services/mockData';
 
 // ─── Storage key ──────────────────────────────────────────────────────────────
 
@@ -35,6 +37,7 @@ interface Store {
   users?: User[];
   departments?: Department[];
   userGroups?: UserGroup[];
+  categories?: Category[];
 }
 
 function buildSeed(): Store {
@@ -48,6 +51,7 @@ function buildSeed(): Store {
     users: JSON.parse(JSON.stringify(seedUsers)) as User[],
     departments: JSON.parse(JSON.stringify(seedDepts)) as Department[],
     userGroups: JSON.parse(JSON.stringify(seedGroups)) as UserGroup[],
+    categories: JSON.parse(JSON.stringify(seedCategories)) as Category[],
   };
 }
 
@@ -80,10 +84,54 @@ export function saveEvent(event: AssessmentEvent): void {
   persist(store);
 }
 
+export function getEvent(id: string): AssessmentEvent | undefined {
+  return load().events.find(e => e.id === id);
+}
+
 export function updateEvent(id: string, partial: Partial<AssessmentEvent>): void {
   const store = load();
   const idx = store.events.findIndex(e => e.id === id);
   if (idx >= 0) store.events[idx] = { ...store.events[idx], ...partial };
+  persist(store);
+}
+
+export function deleteEvent(id: string): void {
+  const store = load();
+  store.events = store.events.filter(e => e.id !== id);
+  persist(store);
+}
+
+// ─── Categories ───────────────────────────────────────────────────────────────
+
+export function getCategories(): Category[] {
+  return load().categories ?? JSON.parse(JSON.stringify(seedCategories));
+}
+
+export function getCategory(id: string): Category | undefined {
+  return getCategories().find(c => c.id === id);
+}
+
+export function saveCategory(cat: Category): void {
+  const store = load();
+  if (!store.categories) store.categories = JSON.parse(JSON.stringify(seedCategories));
+  const idx = store.categories.findIndex(c => c.id === cat.id);
+  if (idx >= 0) store.categories[idx] = cat;
+  else store.categories.push(cat);
+  persist(store);
+}
+
+export function updateCategory(id: string, updates: Partial<Category>): void {
+  const store = load();
+  if (!store.categories) store.categories = JSON.parse(JSON.stringify(seedCategories));
+  const idx = store.categories.findIndex(c => c.id === id);
+  if (idx >= 0) store.categories[idx] = { ...store.categories[idx], ...updates };
+  persist(store);
+}
+
+export function deleteCategory(id: string): void {
+  const store = load();
+  if (!store.categories) store.categories = JSON.parse(JSON.stringify(seedCategories));
+  store.categories = store.categories.filter(c => c.id !== id);
   persist(store);
 }
 
@@ -114,8 +162,12 @@ export function saveTemplateMeta(templateId: string, meta: TemplateMeta): void {
 
 // ─── Questionnaire submissions ────────────────────────────────────────────────
 
-export function getSubmission(eventId: string, userId: string): QuestionnaireSubmission | null {
-  return load().submissions[`${eventId}:${userId}`] ?? null;
+export function getSubmissions(): QuestionnaireSubmission[] {
+  return Object.values(load().submissions);
+}
+
+export function getSubmission(eventId: string, userId: string): QuestionnaireSubmission | undefined {
+  return load().submissions[`${eventId}:${userId}`] ?? undefined;
 }
 
 export function saveSubmission(
@@ -190,6 +242,13 @@ export function saveTemplate(t: Template): void {
   const idx = store.templates.findIndex(x => x.id === t.id);
   if (idx >= 0) store.templates[idx] = t;
   else store.templates.push(t);
+  persist(store);
+}
+
+export function deleteTemplate(id: string): void {
+  const store = load();
+  if (!store.templates) store.templates = JSON.parse(JSON.stringify(seedTemplates));
+  store.templates = store.templates.filter(t => t.id !== id);
   persist(store);
 }
 
@@ -301,12 +360,31 @@ export function getUsers(): User[] {
   return load().users ?? JSON.parse(JSON.stringify(seedUsers));
 }
 
+export function getUser(id: string): User | undefined {
+  return getUsers().find(u => u.id === id);
+}
+
 export function saveUser(user: User): void {
   const store = load();
   if (!store.users) store.users = JSON.parse(JSON.stringify(seedUsers));
   const idx = store.users.findIndex(u => u.id === user.id);
   if (idx >= 0) store.users[idx] = user;
   else store.users.push(user);
+  persist(store);
+}
+
+export function updateUser(id: string, updates: Partial<User>): void {
+  const store = load();
+  if (!store.users) store.users = JSON.parse(JSON.stringify(seedUsers));
+  const idx = store.users.findIndex(u => u.id === id);
+  if (idx >= 0) store.users[idx] = { ...store.users[idx], ...updates };
+  persist(store);
+}
+
+export function deleteUser(id: string): void {
+  const store = load();
+  if (!store.users) store.users = JSON.parse(JSON.stringify(seedUsers));
+  store.users = store.users.filter(u => u.id !== id);
   persist(store);
 }
 
@@ -332,6 +410,18 @@ export function saveDepartment(dept: Department): void {
   persist(store);
 }
 
+export function updateDepartment(id: string, updates: Partial<Department>): void {
+  const store = load();
+  if (!store.departments) store.departments = JSON.parse(JSON.stringify(seedDepts));
+  const idx = store.departments.findIndex(d => d.id === id);
+  if (idx >= 0) store.departments[idx] = { ...store.departments[idx], ...updates };
+  persist(store);
+}
+
+export function deleteDepartment(id: string): void {
+  deleteDepartmentById(id);
+}
+
 export function deleteDepartmentById(id: string): void {
   const store = load();
   if (!store.departments) store.departments = JSON.parse(JSON.stringify(seedDepts));
@@ -354,6 +444,18 @@ export function saveGroup(group: UserGroup): void {
   persist(store);
 }
 
+export function updateGroup(id: string, updates: Partial<UserGroup>): void {
+  const store = load();
+  if (!store.userGroups) store.userGroups = JSON.parse(JSON.stringify(seedGroups));
+  const idx = store.userGroups.findIndex(g => g.id === id);
+  if (idx >= 0) store.userGroups[idx] = { ...store.userGroups[idx], ...updates };
+  persist(store);
+}
+
+export function deleteGroup(id: string): void {
+  deleteGroupById(id);
+}
+
 export function deleteGroupById(id: string): void {
   const store = load();
   if (!store.userGroups) store.userGroups = JSON.parse(JSON.stringify(seedGroups));
@@ -365,4 +467,96 @@ export function deleteGroupById(id: string): void {
 
 export function resetStore(): void {
   persist(buildSeed());
+}
+
+// ─── Assessment Frameworks ────────────────────────────────────────────────────
+
+const FRAMEWORKS_KEY = 'g2a_frameworks';
+
+function loadFrameworks(): AssessmentFramework[] {
+  try {
+    const raw = localStorage.getItem(FRAMEWORKS_KEY);
+    if (raw) return JSON.parse(raw) as AssessmentFramework[];
+  } catch {
+    // corrupted — fall through to seed
+  }
+  const seed = JSON.parse(JSON.stringify(seedFrameworks)) as AssessmentFramework[];
+  localStorage.setItem(FRAMEWORKS_KEY, JSON.stringify(seed));
+  return seed;
+}
+
+function persistFrameworks(frameworks: AssessmentFramework[]): void {
+  localStorage.setItem(FRAMEWORKS_KEY, JSON.stringify(frameworks));
+  window.dispatchEvent(new Event('g2a-store-updated'));
+}
+
+export function getFrameworks(): AssessmentFramework[] {
+  return loadFrameworks();
+}
+
+export function getFramework(id: string): AssessmentFramework | undefined {
+  return loadFrameworks().find(fw => fw.id === id);
+}
+
+export function saveFramework(fw: AssessmentFramework): void {
+  const all = loadFrameworks();
+  const idx = all.findIndex(f => f.id === fw.id);
+  if (idx >= 0) all[idx] = fw;
+  else all.push(fw);
+  persistFrameworks(all);
+}
+
+export function updateFramework(id: string, updates: Partial<AssessmentFramework>): void {
+  const all = loadFrameworks();
+  const idx = all.findIndex(f => f.id === id);
+  if (idx >= 0) all[idx] = { ...all[idx], ...updates };
+  persistFrameworks(all);
+}
+
+// ─── Tasks ────────────────────────────────────────────────────────────────────
+
+const TASKS_KEY = 'g2a-tasks';
+
+function loadTasks(): import('../types').Task[] {
+  try {
+    const raw = localStorage.getItem(TASKS_KEY);
+    if (raw) return JSON.parse(raw) as import('../types').Task[];
+  } catch { /* ignore */ }
+  return [];
+}
+
+function persistTasks(tasks: import('../types').Task[]): void {
+  localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+  window.dispatchEvent(new Event('g2a-store-updated'));
+}
+
+export function getTasks(): import('../types').Task[] {
+  return loadTasks();
+}
+
+export function getEventTasks(eventId: string): import('../types').Task[] {
+  return loadTasks().filter(t => t.eventId === eventId);
+}
+
+export function getTask(id: string): import('../types').Task | undefined {
+  return loadTasks().find(t => t.id === id);
+}
+
+export function saveTask(task: import('../types').Task): void {
+  const all = loadTasks();
+  const idx = all.findIndex(t => t.id === task.id);
+  if (idx >= 0) all[idx] = task;
+  else all.push(task);
+  persistTasks(all);
+}
+
+export function updateTask(id: string, updates: Partial<import('../types').Task>): void {
+  const all = loadTasks();
+  const idx = all.findIndex(t => t.id === id);
+  if (idx >= 0) all[idx] = { ...all[idx], ...updates };
+  persistTasks(all);
+}
+
+export function deleteTask(id: string): void {
+  persistTasks(loadTasks().filter(t => t.id !== id));
 }

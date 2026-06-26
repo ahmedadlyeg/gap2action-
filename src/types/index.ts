@@ -60,6 +60,7 @@ export interface Template {
   tagline?: string;
   definition?: string;
   explanation?: string;
+  frameworkId?: string;
 }
 
 export interface RespondentProgress {
@@ -90,6 +91,7 @@ export interface AssessmentEvent {
   maturityLevel?: MaturityLevel;
   trend?: 'up' | 'down' | 'flat';
   createdAt: string;
+  frameworkId?: string;
 }
 
 export interface Recommendation {
@@ -103,17 +105,26 @@ export interface Recommendation {
   createdAt: string;
 }
 
+export type TaskEffort = 'Small' | 'Medium' | 'Large';
+
 export interface Task {
   id: string;
+  eventId: string;              // links task to its assessment event
   title: string;
   description: string;
-  ownerId: string;
+  progressNotes: string;
+  recId: string;                // recommendation / gap group id
+  recName: string;              // recommendation / gap group label
+  gapWeight: number;
+  assigneeId?: string;          // user id of person responsible
   priority: Priority;
   status: TaskStatus;
-  dueDate: string;
-  dependsOn: string[];
-  sourceRecommendationId: string | null;
+  effort: TaskEffort;
+  startDate: string;            // 'YYYY-MM-DD'
+  dueDate: string;              // 'YYYY-MM-DD'
+  dependsOn: string[];          // task IDs
   completionPct: number;
+  createdAt: string;
 }
 
 export interface SectionAssignment {
@@ -123,7 +134,24 @@ export interface SectionAssignment {
 
 // ─── Template Builder ─────────────────────────────────────────────────────────
 
-export type QuestionType = 'single-choice' | 'multi-choice' | 'rating-scale' | 'yes-no' | 'free-text';
+export type QuestionType =
+  | 'single-choice' | 'multi-choice' | 'rating-scale' | 'yes-no' | 'free-text'
+  | 'yes-no-partial' | 'percentage' | 'frequency';
+
+export type ScoringMethod = 'weighted_section' | 'simple_average' | 'categorical_weight';
+
+export interface MaturityLevelConfig {
+  level: number; label: string; description: string; minScore: number; maxScore: number;
+}
+
+export interface AssessmentFramework {
+  id: string; name: string; description: string;
+  allowedQuestionTypes: QuestionType[];
+  scoringMethod: ScoringMethod;
+  maturityLevels: MaturityLevelConfig[];
+  status: 'Draft' | 'Active' | 'Archived';
+  createdBy: string; createdAt: string; updatedAt: string;
+}
 
 export interface AnswerOption {
   id: string;
@@ -154,21 +182,28 @@ export interface BuilderSection {
   questions: BuilderQuestion[];
 }
 
-// ─── Persistence ──────────────────────────────────────────────────────────────
+// ─── Questionnaire runtime ────────────────────────────────────────────────────
+
+export interface EvidenceFile {
+  id: string;
+  name: string;
+  size: string;
+}
 
 export interface QuestionnaireSubmission {
   eventId: string;
   userId: string;
-  answers: Record<string, string | string[] | number>;
+  answers: Record<string, string | string[] | number | null>;
+  evidence?: Record<string, EvidenceFile[]>;
   completionPct: number;
-  status: 'In Progress' | 'Submitted';
+  status: RespondentStatus;
+  score?: number;
   submittedAt?: string;
 }
 
 export interface RespondentAction {
-  status: 'Validated' | 'Returned for Revision';
+  status: RespondentStatus;
   feedback?: string;
-  returnedAt?: string;
   returnCount: number;
-  actionAt: string;
+  actionAt?: string;
 }

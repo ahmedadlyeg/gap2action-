@@ -14,7 +14,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   ChevronRight, ChevronDown, Plus, Trash2, GripVertical,
   Save, Zap, ArrowLeft, BarChart2, Info, X, Check, Lock, Eye, GitBranch,
-  Upload, Download, AlertCircle, AlertTriangle, Camera, ImageIcon, LayoutTemplate,
+  Upload, Download, AlertCircle, AlertTriangle, Camera, ImageIcon, LayoutTemplate, LayoutGrid,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -28,9 +28,10 @@ import {
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
 import { templates as seedTemplates } from '@/services/mockData';
-import { getTemplateSections, saveTemplateSections, updateEvent, getTemplateMeta, saveTemplateMeta, cloneTemplate, getTemplates, getVersionFamily, saveTemplate, getTemplate, updateTemplate } from '@/services/store';
+import { getTemplateSections, saveTemplateSections, updateEvent, getTemplateMeta, saveTemplateMeta, cloneTemplate, getTemplates, getVersionFamily, saveTemplate, getTemplate, updateTemplate, getFramework } from '@/services/store';
 import { useAuth } from '@/context/AuthContext';
 import type { TemplateStatus, QuestionType, AnswerOption, BuilderQuestion, BuilderSection, Template } from '@/types';
+import { scoringMethodLabel } from './FrameworkList';
 import { parseTemplateCSV, exportSectionsToCSV, generateCsvTemplate, type CsvImportResult } from '@/utils/csvImport';
 
 interface MaturityRow {
@@ -115,13 +116,18 @@ const SEED_SECTIONS: BuilderSection[] = [
 let _counter = 100;
 function uid(prefix: string) { return `${prefix}${++_counter}`; }
 
-const Q_TYPE_LABELS: Record<QuestionType, string> = {
+const ALL_Q_TYPE_LABELS: Partial<Record<QuestionType, string>> = {
   'single-choice': 'Single Choice',
-  'multi-choice': 'Multi-Choice',
-  'rating-scale': 'Rating Scale',
+  'multi-choice': 'Multi-Select',
+  'rating-scale': 'Rating Scale (1–5)',
   'yes-no': 'Yes / No',
-  'free-text': 'Free Text',
+  'yes-no-partial': 'Yes / No / Partially',
+  'percentage': 'Percentage Coverage',
+  'frequency': 'Frequency',
 };
+
+// Kept as module-level fallback; the component derives a filtered version per framework
+const Q_TYPE_LABELS: Partial<Record<QuestionType, string>> = ALL_Q_TYPE_LABELS;
 
 function blankQuestion(sectionId: string): BuilderQuestion {
   return {
@@ -255,7 +261,7 @@ function SortableQuestionRow({ question, selected, locked, onSelect, onDelete }:
       <span className="flex-1 truncate text-[11px] leading-snug">
         {question.text || <span className="italic opacity-50">Untitled question</span>}
       </span>
-      <span className="shrink-0 text-[9px] opacity-60 font-mono uppercase">{Q_TYPE_LABELS[question.type].split(' ')[0]}</span>
+      <span className="shrink-0 text-[9px] opacity-60 font-mono uppercase">{(Q_TYPE_LABELS[question.type] ?? question.type).split(' ')[0]}</span>
       {!locked && (
         <button
           className="shrink-0 opacity-0 group-hover/row:opacity-100 text-destructive p-0.5 transition-opacity"
@@ -352,9 +358,10 @@ interface QuestionFormProps {
   question: BuilderQuestion;
   locked: boolean;
   onChange: (patch: Partial<BuilderQuestion>) => void;
+  qTypeLabels?: Partial<Record<QuestionType, string>>;
 }
 
-function QuestionForm({ question, locked, onChange }: QuestionFormProps) {
+function QuestionForm({ question, locked, onChange, qTypeLabels = Q_TYPE_LABELS }: QuestionFormProps) {
   const addOption = () =>
     onChange({ options: [...question.options, { id: uid('o'), text: '', score: 0 }] });
 
@@ -432,11 +439,13 @@ function QuestionForm({ question, locked, onChange }: QuestionFormProps) {
           onChange={e => onChange({ type: e.target.value as QuestionType })}
           disabled={locked}
         >
-          {(Object.entries(Q_TYPE_LABELS) as [QuestionType, string][]).map(([v, l]) => (
+          {(Object.entries(qTypeLabels) as [QuestionType, string][]).map(([v, l]) => (
             <option key={v} value={v}>{l}</option>
           ))}
         </Select>
       </div>
+
+
 
       {/* ── Dynamic scoring section ─────────────────────── */}
 
@@ -822,6 +831,14 @@ export function TemplateBuilder() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const template = seedTemplates.find(t => t.id === id) ?? getTemplates().find(t => t.id === id);
+  const framework = template?.frameworkId ? getFramework(template.frameworkId) : undefined;
+  const effectiveQTypeLabels: Partial<Record<QuestionType, string>> = framework
+    ? Object.fromEntries(
+        Object.entries(ALL_Q_TYPE_LABELS).filter(([k]) =>
+          framework.allowedQuestionTypes.includes(k as QuestionType)
+        )
+      )
+    : ALL_Q_TYPE_LABELS;
 
   // ── Builder state — seed from store if previously saved, else from mockData ──
   const _meta = id ? getTemplateMeta(id) : null;
@@ -1067,631 +1084,408 @@ export function TemplateBuilder() {
     setActiveDragId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-
     const activeType = active.data.current?.type;
-    const overType = over.data.current?.type;
+    const overType   = over.data.current?.type;
 
-    if (activeType === 'section' && overType === 'section') {
+    if (activeType === 'section') {
       setSections(prev => {
         const oldIdx = prev.findIndex(s => s.id === active.id);
         const newIdx = prev.findIndex(s => s.id === over.id);
-        return oldIdx !== -1 && newIdx !== -1 ? arrayMove(prev, oldIdx, newIdx) : prev;
+        if (oldIdx < 0 || newIdx < 0) return prev;
+        return arrayMove(prev, oldIdx, newIdx);
       });
+      markDirty();
     } else if (activeType === 'question') {
-      const sectionId = active.data.current?.sectionId as string;
-      setSections(prev => prev.map(s => {
-        if (s.id !== sectionId) return s;
-        const oldIdx = s.questions.findIndex(q => q.id === active.id);
-        const newIdx = s.questions.findIndex(q => q.id === over.id);
-        if (oldIdx === -1 || newIdx === -1) return s;
-        return { ...s, questions: arrayMove(s.questions, oldIdx, newIdx) };
-      }));
+      const srcSectionId = active.data.current?.sectionId as string;
+      const dstSectionId = (overType === 'question'
+        ? (over.data.current?.sectionId as string)
+        : (over.id as string));
+      setSections(prev => {
+        if (srcSectionId === dstSectionId) {
+          return prev.map(s => {
+            if (s.id !== srcSectionId) return s;
+            const oi = s.questions.findIndex(q => q.id === active.id);
+            const ni = s.questions.findIndex(q => q.id === over.id);
+            if (oi < 0 || ni < 0) return s;
+            return { ...s, questions: arrayMove(s.questions, oi, ni) };
+          });
+        }
+        // Cross-section move
+        const q = prev.find(s => s.id === srcSectionId)?.questions.find(q => q.id === active.id);
+        if (!q) return prev;
+        return prev.map(s => {
+          if (s.id === srcSectionId) return { ...s, questions: s.questions.filter(x => x.id !== active.id) };
+          if (s.id === dstSectionId) return { ...s, questions: [...s.questions, q] };
+          return s;
+        });
+      });
+      markDirty();
     }
-    markDirty();
   };
 
-  // ── Derive selected item ──
-  const selectedSection = selection.kind === 'section' || selection.kind === 'question'
-    ? sections.find(s => s.id === (selection as { sectionId: string }).sectionId)
-    : undefined;
-  const selectedQuestion = selection.kind === 'question'
-    ? selectedSection?.questions.find(q => q.id === (selection as { questionId: string }).questionId)
-    : undefined;
-
-  // ── Total questions count ──
-  const totalQ = sections.reduce((n, s) => n + s.questions.length, 0);
+  // ── Right panel content ──
+  const rightPanel = () => {
+    if (selection.kind === 'cover') {
+      return id ? <CoverPanel templateId={id} locked={locked} /> : null;
+    }
+    if (selection.kind === 'scoring') {
+      return (
+        <ScoringPanel
+          maturityLevels={maturityLevels}
+          targetScore={targetScore}
+          locked={locked}
+          onChangeLevel={(id, patch) => {
+            setMaturityLevels(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+            markDirty();
+          }}
+          onChangeTarget={v => { setTargetScore(v); markDirty(); }}
+        />
+      );
+    }
+    if (selection.kind === 'section') {
+      const sec = sections.find(s => s.id === selection.sectionId);
+      if (!sec) return null;
+      return (
+        <SectionForm
+          section={sec}
+          totalSections={sections.length}
+          locked={locked}
+          onChange={patch => updateSection(selection.sectionId, patch)}
+          onAddQuestion={() => addQuestion(selection.sectionId)}
+        />
+      );
+    }
+    if (selection.kind === 'question') {
+      const sec = sections.find(s => s.id === selection.sectionId);
+      const q   = sec?.questions.find(q => q.id === selection.questionId);
+      if (!q) return null;
+      return (
+        <QuestionForm
+          question={q}
+          locked={locked}
+          onChange={patch => updateQuestion(selection.sectionId, selection.questionId, patch)}
+          qTypeLabels={effectiveQTypeLabels}
+        />
+      );
+    }
+    return null;
+  };
 
   if (!template) {
     return (
-      <div className="p-8 text-center text-muted-foreground">
-        <p>Template not found.</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={() => requestNavigation('/categories')}>
-          ← Back to Categories
-        </Button>
+      <div className="flex items-center justify-center h-full">
+        <p className="text-muted-foreground">Template not found.</p>
       </div>
     );
   }
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex flex-col h-screen overflow-hidden bg-background">
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div className="flex flex-col h-screen overflow-hidden bg-background">
 
-        {/* ── Toolbar ── */}
-        <header className="flex h-13 shrink-0 items-center justify-between border-b bg-background px-4 gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => requestNavigation('/categories')}>
-                  <ArrowLeft size={15} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Back to Categories</TooltipContent>
-            </Tooltip>
+          {/* ── Top bar ── */}
+          <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-5 gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => requestNavigation(-1)}>
+                <ArrowLeft size={15} />
+              </Button>
 
-            {/* Editable template name */}
-            {editingName && !locked ? (
-              <Input
-                autoFocus
-                value={name}
-                onChange={e => { setName(e.target.value); markDirty(); }}
-                onBlur={() => setEditingName(false)}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingName(false); }}
-                className="h-7 text-sm font-semibold w-64"
-              />
-            ) : (
-              <button
-                onClick={() => !locked && setEditingName(true)}
-                className={`text-sm font-semibold text-foreground truncate max-w-xs ${!locked ? 'hover:text-primary cursor-text' : 'cursor-default'}`}
-                title={locked ? undefined : 'Click to rename'}
-              >
-                {name}
-              </button>
-            )}
-
-            <span className="text-xs font-mono text-muted-foreground shrink-0">v{version}</span>
-
-            <Badge variant={status === 'Active' ? 'success' : status === 'Archived' ? 'secondary' : 'outline'}>
-              {status}
-            </Badge>
-
-            {locked && (
-              <div className="flex items-center gap-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5 shrink-0">
-                <Lock size={11} /> Frozen — read only
-              </div>
-            )}
-
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[11px] text-muted-foreground hidden sm:block">
-              {sections.length} sections · {totalQ} questions
-            </span>
-
-            {savedAt && (
-              <span className="text-[11px] text-emerald-600 flex items-center gap-1 animate-in fade-in">
-                <Check size={11} /> Saved
-              </span>
-            )}
-
-            <Button variant="outline" size="sm" onClick={() => setPreviewOpen(true)}>
-              <Eye size={13} className="mr-1.5" /> Preview as Respondent
-            </Button>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={sections.length === 0}>
-                  <Download size={13} className="mr-1.5" /> Export CSV
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Export this template's sections as a CSV file</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
-                  <Download size={13} className="mr-1.5" /> CSV Format
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Download blank CSV format reference for import</TooltipContent>
-            </Tooltip>
-
-            {!locked && (
-              <>
+              {/* Editable template name */}
+              {editingName && !locked ? (
                 <input
-                  ref={csvInputRef}
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  onChange={handleCsvFileChange}
+                  autoFocus
+                  className="text-sm font-semibold bg-transparent border-b border-primary outline-none min-w-0 max-w-xs"
+                  value={name}
+                  onChange={e => { setName(e.target.value); markDirty(); }}
+                  onBlur={() => setEditingName(false)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingName(false); }}
                 />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()}>
-                      <Upload size={13} className="mr-1.5" /> Import CSV
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Import sections from a CSV file</TooltipContent>
-                </Tooltip>
-                <Button variant="outline" size="sm" onClick={handleSaveDraft}>
-                  <Save size={13} className="mr-1.5" /> Save Draft
-                </Button>
-                <Button size="sm" onClick={() => setActivateOpen(true)}>
-                  <Zap size={13} className="mr-1.5" /> Activate
-                </Button>
-              </>
-            )}
-          </div>
-        </header>
-
-        {/* ── Frozen banner ── */}
-        {locked && (() => {
-          const major = parseInt(version.split('.')[0], 10);
-          const nextVersion = `${major + 1}.0`;
-          return (
-            <div className="shrink-0 flex items-center justify-between gap-4 border-b bg-amber-50 px-5 py-2.5">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <Lock size={13} className="text-amber-600 shrink-0" />
-                <div className="text-xs text-amber-800 leading-snug">
-                  <span className="font-semibold">This template is frozen — v{version} is {status} and cannot be edited.</span>
-                  {status === 'Active' && (
-                    <span className="ml-1">To make changes, create a new draft version based on this one.</span>
-                  )}
-                </div>
-              </div>
-              {status === 'Active' && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0 border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
-                  onClick={() => setNewVersionOpen(true)}
+              ) : (
+                <button
+                  className="text-sm font-semibold text-foreground truncate max-w-xs hover:text-primary transition-colors"
+                  onClick={() => !locked && setEditingName(true)}
+                  title={locked ? undefined : 'Click to rename'}
                 >
-                  <GitBranch size={13} className="mr-1.5" /> Create New Version
-                </Button>
+                  {name}
+                </button>
               )}
-            </div>
-          );
-        })()}
 
-        {/* ── Body: sidebar + right panel ── */}
-        <div className="flex flex-1 min-h-0">
-
-          {/* Left sidebar — section tree */}
-          <aside className="w-[260px] shrink-0 flex flex-col border-r bg-muted/20 overflow-hidden">
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              {/* Fixed Cover button — always at top, never draggable */}
-              <button
-                onClick={() => setSelection({ kind: 'cover' })}
-                className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors mb-1 ${
-                  selection.kind === 'cover'
-                    ? 'bg-sky-50 text-sky-700'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                }`}
-              >
-                <LayoutTemplate size={13} className="shrink-0" />
-                <span className="flex-1 text-left">Template Cover</span>
-                <span className="text-[10px] opacity-60">Intro</span>
-              </button>
-
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-              >
-                <SortableContext items={sections.map(s => s.id)} strategy={verticalListSortingStrategy}>
-                  {sections.map(section => {
-                    const selQ = selection.kind === 'question' && (selection as { sectionId: string }).sectionId === section.id
-                      ? (selection as { questionId: string }).questionId
-                      : undefined;
-                    return (
-                      <SortableSectionRow
-                        key={section.id}
-                        section={section}
-                        expanded={expandedSections.has(section.id)}
-                        selected={selection.kind === 'section' && (selection as { sectionId: string }).sectionId === section.id}
-                        selectedQuestionId={selQ}
-                        locked={locked}
-                        onToggleExpand={() => toggleExpanded(section.id)}
-                        onSelect={() => setSelection({ kind: 'section', sectionId: section.id })}
-                        onSelectQuestion={qId => setSelection({ kind: 'question', sectionId: section.id, questionId: qId })}
-                        onDelete={() => deleteSection(section.id)}
-                        onDeleteQuestion={qId => deleteQuestion(section.id, qId)}
-                      >
-                        {null}
-                      </SortableSectionRow>
-                    );
-                  })}
-                </SortableContext>
-
-                <DragOverlay>
-                  {activeDragId && (
-                    <div className="rounded-lg bg-white border border-primary shadow-lg px-3 py-2 text-xs font-medium opacity-90">
-                      {sections.find(s => s.id === activeDragId)?.name
-                        ?? sections.flatMap(s => s.questions).find(q => q.id === activeDragId)?.text
-                        ?? 'Dragging…'}
-                    </div>
-                  )}
-                </DragOverlay>
-              </DndContext>
-
-              {sections.length === 0 && (
-                <p className="text-[11px] text-muted-foreground text-center py-6 px-2">
-                  No sections yet. Add one below.
-                </p>
-              )}
+              <Badge variant={status === 'Active' ? 'success' : status === 'Archived' ? 'outline' : 'secondary'} className="text-[10px] shrink-0">
+                {status}
+              </Badge>
+              <span className="text-[11px] text-muted-foreground shrink-0">v{version}</span>
+              {locked && <Lock size={12} className="text-muted-foreground shrink-0" />}
             </div>
 
-            {/* Sidebar footer */}
-            <div className="shrink-0 border-t p-3 space-y-1.5">
-              {!locked && (
-                <Button variant="outline" size="sm" className="w-full h-8 text-xs" onClick={addSection}>
-                  <Plus size={13} className="mr-1.5" /> Add Section
-                </Button>
-              )}
-              <button
-                onClick={() => setSelection({ kind: 'scoring' })}
-                className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
-                  selection.kind === 'scoring'
-                    ? 'bg-emerald-50 text-emerald-700'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                }`}
-              >
-                <BarChart2 size={13} /> Scoring Model
-              </button>
-            </div>
-          </aside>
-
-          {/* Right panel */}
-          <main className="flex-1 overflow-y-auto">
-            <div className="max-w-2xl mx-auto p-6">
-              {selection.kind === 'cover' && id && (
-                <CoverPanel templateId={id} locked={locked} />
-              )}
-
-              {selection.kind === 'scoring' && (
-                <ScoringPanel
-                  maturityLevels={maturityLevels}
-                  targetScore={targetScore}
-                  locked={locked}
-                  onChangeLevel={(id, patch) => {
-                    setMaturityLevels(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
-                    markDirty();
-                  }}
-                  onChangeTarget={v => { setTargetScore(v); markDirty(); }}
-                />
-              )}
-
-              {selection.kind === 'section' && selectedSection && (
-                <SectionForm
-                  section={selectedSection}
-                  totalSections={sections.length}
-                  locked={locked}
-                  onChange={patch => updateSection(selectedSection.id, patch)}
-                  onAddQuestion={() => addQuestion(selectedSection.id)}
-                />
-              )}
-
-              {selection.kind === 'question' && selectedQuestion && selectedSection && (
-                <QuestionForm
-                  question={selectedQuestion}
-                  locked={locked}
-                  onChange={patch => updateQuestion(selectedSection.id, selectedQuestion.id, patch)}
-                />
-              )}
-
-              {/* Empty state */}
-              {!selectedSection && !selectedQuestion && selection.kind !== 'scoring' && selection.kind !== 'cover' && (
-                <div className="flex flex-col items-center justify-center h-64 text-center">
-                  <p className="text-sm text-muted-foreground">Select a section or question from the sidebar to edit it.</p>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Framework badge */}
+              {framework && (
+                <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] text-slate-600">
+                  <LayoutGrid size={11} />
+                  {framework.name}
                 </div>
               )}
+
+              {savedAt && (
+                <span className="text-[11px] text-emerald-600 font-medium hidden sm:inline">Saved</span>
+              )}
+              {isDirty && !savedAt && (
+                <span className="text-[11px] text-amber-600 font-medium hidden sm:inline">Unsaved changes</span>
+              )}
+
+              {!locked && (
+                <>
+                  <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleSaveDraft}>
+                    <Save size={13} className="mr-1.5" /> Save
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setPreviewOpen(true)}>
+                    <Eye size={13} className="mr-1.5" /> Preview
+                  </Button>
+                  <Button size="sm" className="h-8 text-xs" onClick={() => setActivateOpen(true)} disabled={sections.length === 0}>
+                    <Zap size={13} className="mr-1.5" /> Activate
+                  </Button>
+                </>
+              )}
+
+              {(status === 'Active' || status === 'Archived') && user?.role === 'admin' && (
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setNewVersionOpen(true)}>
+                  <GitBranch size={13} className="mr-1.5" /> New Version
+                </Button>
+              )}
             </div>
-          </main>
+          </header>
+
+          {/* ── Body ── */}
+          <div className="flex flex-1 min-h-0">
+
+            {/* ── Left: Section tree ── */}
+            <aside className="w-56 shrink-0 border-r bg-muted/20 overflow-y-auto flex flex-col">
+              <div className="p-3 border-b space-y-1">
+                {/* Cover page nav */}
+                <button
+                  onClick={() => setSelection({ kind: 'cover' })}
+                  className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors ${
+                    selection.kind === 'cover' ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted/60'
+                  }`}
+                >
+                  <LayoutTemplate size={13} className="shrink-0" />
+                  Cover Page
+                </button>
+                {/* Scoring nav */}
+                <button
+                  onClick={() => setSelection({ kind: 'scoring' })}
+                  className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors ${
+                    selection.kind === 'scoring' ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted/60'
+                  }`}
+                >
+                  <BarChart2 size={13} className="shrink-0" />
+                  Scoring Model
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+                <SortableContext items={sections.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                  {sections.map(sec => (
+                    <SortableSectionRow
+                      key={sec.id}
+                      section={sec}
+                      expanded={expandedSections.has(sec.id)}
+                      selected={
+                        (selection.kind === 'section' && selection.sectionId === sec.id) ||
+                        (selection.kind === 'question' && selection.sectionId === sec.id)
+                      }
+                      selectedQuestionId={selection.kind === 'question' ? selection.questionId : undefined}
+                      locked={locked}
+                      onToggleExpand={() => toggleExpanded(sec.id)}
+                      onSelect={() => setSelection({ kind: 'section', sectionId: sec.id })}
+                      onSelectQuestion={qId => setSelection({ kind: 'question', sectionId: sec.id, questionId: qId })}
+                      onDelete={() => deleteSection(sec.id)}
+                      onDeleteQuestion={qId => deleteQuestion(sec.id, qId)}
+                    >
+                      {!locked && (
+                        <button
+                          className="w-full flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+                          onClick={e => { e.stopPropagation(); addQuestion(sec.id); }}
+                        >
+                          <Plus size={11} /> Add Question
+                        </button>
+                      )}
+                    </SortableSectionRow>
+                  ))}
+                </SortableContext>
+              </div>
+
+              {/* Add Section + Import buttons */}
+              {!locked && (
+                <div className="border-t p-2 space-y-1">
+                  <Button variant="ghost" size="sm" className="w-full h-8 text-xs justify-start" onClick={addSection}>
+                    <Plus size={13} className="mr-1.5" /> Add Section
+                  </Button>
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="sm" className="flex-1 h-7 text-[11px]" onClick={() => csvInputRef.current?.click()}>
+                      <Upload size={11} className="mr-1" /> Import CSV
+                    </Button>
+                    <Button variant="ghost" size="sm" className="flex-1 h-7 text-[11px]" onClick={handleExportCsv} disabled={sections.length === 0}>
+                      <Download size={11} className="mr-1" /> Export
+                    </Button>
+                  </div>
+                  <input ref={csvInputRef} type="file" accept=".csv" className="hidden" onChange={handleCsvFileChange} />
+                </div>
+              )}
+            </aside>
+
+            {/* ── Right: Detail panel ── */}
+            <main className="flex-1 overflow-y-auto p-6">
+              {rightPanel()}
+            </main>
+          </div>
         </div>
 
-        {/* ── Preview Dialog ── */}
-        <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-          <DialogContent className="max-w-3xl h-[90vh] flex flex-col p-0 gap-0">
-            <DialogTitle className="sr-only">Preview as Respondent</DialogTitle>
-            {/* Banner */}
-            <div className="flex items-center justify-between px-5 py-3 bg-amber-50 border-b border-amber-200 shrink-0">
-              <div className="flex items-center gap-2 text-amber-700 text-xs font-semibold uppercase tracking-wide">
-                <Eye size={14} />
-                Preview Mode — answers are not saved
-              </div>
-              <DialogClose asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-700 hover:bg-amber-100">
-                  <X size={14} />
-                </Button>
-              </DialogClose>
+        {/* DnD ghost */}
+        <DragOverlay>
+          {activeDragId && (
+            <div className="rounded-lg border bg-card shadow-xl px-3 py-2 text-xs font-medium opacity-90">
+              Moving…
             </div>
+          )}
+        </DragOverlay>
+      </DndContext>
 
-            {/* Scrollable content */}
-            <div className="flex flex-1 min-h-0 overflow-hidden">
-              {/* Section sidebar */}
-              <aside className="w-52 shrink-0 border-r bg-muted/20 overflow-y-auto py-3">
-                <p className="px-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Sections</p>
-                {sections.map((sec, si) => (
-                  <div key={sec.id} className="px-3 py-1.5">
-                    <p className="text-xs font-medium text-foreground truncate">{si + 1}. {sec.name}</p>
-                    <p className="text-[10px] text-muted-foreground">{sec.questions.length} question{sec.questions.length !== 1 ? 's' : ''}</p>
-                  </div>
-                ))}
-              </aside>
+      {/* ── Activate dialog ── */}
+      <Dialog open={activateOpen} onOpenChange={setActivateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap size={16} className="text-amber-500" /> Activate Template
+            </DialogTitle>
+            <DialogDescription>
+              Activating will lock this template for editing and bump the patch version.
+              Any existing Active version in this family will be archived.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+            <Button onClick={handleActivateConfirm}>Activate</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-              {/* Questions scroll area */}
-              <div className="flex-1 overflow-y-auto px-8 py-6 space-y-10">
-                {sections.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-20">No sections yet. Add sections in the builder.</p>
-                )}
-                {sections.map((sec, si) => (
-                  <div key={sec.id} className="space-y-6">
-                    <div className="border-b pb-3">
-                      <p className="text-xs text-muted-foreground mb-0.5">Section {si + 1} of {sections.length}</p>
-                      <h2 className="text-lg font-bold text-foreground">{sec.name}</h2>
-                      {sec.description && <p className="text-sm text-muted-foreground mt-1">{sec.description}</p>}
-                    </div>
+      {/* ── New Version dialog ── */}
+      <Dialog open={newVersionOpen} onOpenChange={setNewVersionOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitBranch size={16} /> Create New Version
+            </DialogTitle>
+            <DialogDescription>
+              A new Draft copy of this template will be created. The current version remains unchanged.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+            <Button onClick={handleCreateNewVersionConfirm}>Create New Version</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-                    {sec.questions.map((q, qi) => (
-                      <div key={q.id} className="rounded-xl border bg-card p-5 space-y-4">
-                        <div>
-                          <p className="text-[10px] text-muted-foreground font-mono mb-1">Question {qi + 1} of {sec.questions.length}</p>
-                          <p className="text-sm font-semibold text-foreground leading-relaxed">
-                            {q.text || <span className="text-muted-foreground italic">Untitled question</span>}
-                            {q.required && <span className="text-destructive ml-1">*</span>}
-                          </p>
-                          {q.guidance && (
-                            <details className="mt-2">
-                              <summary className="text-xs text-primary cursor-pointer flex items-center gap-1">
-                                <Info size={11} /> Guidance notes
-                              </summary>
-                              <p className="text-xs text-muted-foreground mt-1.5 pl-4 border-l-2 border-muted">{q.guidance}</p>
-                            </details>
-                          )}
-                        </div>
+      {/* ── Preview dialog ── */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Preview Questionnaire</DialogTitle>
+            <DialogDescription>
+              Open the questionnaire in preview mode (read-only, no answers saved).
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+            <Button asChild>
+              <a href={`/questionnaire/${id}?mode=preview`} target="_blank" rel="noreferrer">
+                Open Preview
+              </a>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-                        {/* Single choice */}
-                        {q.type === 'single-choice' && (
-                          <div className="space-y-2">
-                            {q.options.map(opt => (
-                              <label key={opt.id} className="flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
-                                <input type="radio" name={`prev-${q.id}`} className="accent-primary" />
-                                <span className="text-sm text-foreground">{opt.text || <span className="text-muted-foreground italic">Option</span>}</span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Multi choice */}
-                        {q.type === 'multi-choice' && (
-                          <div className="space-y-2">
-                            {q.options.map(opt => (
-                              <label key={opt.id} className="flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
-                                <input type="checkbox" className="accent-primary rounded" />
-                                <span className="text-sm text-foreground">{opt.text || <span className="text-muted-foreground italic">Option</span>}</span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Rating scale */}
-                        {q.type === 'rating-scale' && (
-                          <div className="space-y-2">
-                            <div className="flex gap-2">
-                              {(q.ratingScores ?? [1,2,3,4,5]).map(val => (
-                                <label key={val} className="flex flex-col items-center gap-1 cursor-pointer">
-                                  <input type="radio" name={`prev-${q.id}`} className="accent-primary" />
-                                  <span className="text-xs font-semibold text-foreground">{val}</span>
-                                </label>
-                              ))}
-                            </div>
-                            {(q.minLabel || q.maxLabel) && (
-                              <div className="flex justify-between text-[10px] text-muted-foreground">
-                                <span>{q.minLabel}</span>
-                                <span>{q.maxLabel}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Yes / No */}
-                        {q.type === 'yes-no' && (
-                          <div className="flex gap-3">
-                            {['Yes', 'No'].map(val => (
-                              <label key={val} className="flex items-center gap-2 rounded-lg border px-5 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors">
-                                <input type="radio" name={`prev-${q.id}`} className="accent-primary" />
-                                <span className="text-sm font-medium text-foreground">{val}</span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Free text */}
-                        {q.type === 'free-text' && (
-                          <textarea
-                            className="w-full rounded-lg border bg-background px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
-                            rows={4}
-                            placeholder="Enter your response here…"
-                          />
-                        )}
+      {/* ── CSV Import modal ── */}
+      <Dialog open={importModalOpen} onOpenChange={setImportModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import Sections from CSV</DialogTitle>
+            <DialogDescription>
+              Review the import result below before confirming.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 pb-2 space-y-3 max-h-72 overflow-y-auto">
+            {importResult && (
+              <>
+                {importResult.errors.length > 0 && (
+                  <div className="space-y-1">
+                    {importResult.errors.map((e, i) => (
+                      <div key={i} className="flex items-start gap-2 text-xs text-destructive">
+                        <AlertCircle size={13} className="shrink-0 mt-0.5" /> {e}
                       </div>
                     ))}
                   </div>
-                ))}
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* ── Create New Version Dialog ── */}
-        {(() => {
-          const major = parseInt(version.split('.')[0], 10);
-          const nextVersion = `${major + 1}.0`;
-          return (
-            <Dialog open={newVersionOpen} onOpenChange={setNewVersionOpen}>
-              <DialogContent hideClose>
-                <DialogHeader>
-                  <DialogTitle className="text-base font-semibold flex items-center gap-2">
-                    <GitBranch size={16} className="text-primary" />
-                    Create v{nextVersion} Draft?
-                  </DialogTitle>
-                  <DialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed">
-                    A new editable draft will be created from v{version}.
-                    All existing events using v{version} will be unaffected.
-                  </DialogDescription>
-                </DialogHeader>
-                <DialogFooter>
-                  <DialogClose asChild>
-                    <Button variant="ghost" size="sm">Cancel</Button>
-                  </DialogClose>
-                  <Button size="sm" onClick={handleCreateNewVersionConfirm}>
-                    <GitBranch size={13} className="mr-1.5" /> Create Draft
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          );
-        })()}
-
-        {/* ── CSV Import Preview Dialog ── */}
-        <Dialog open={importModalOpen} onOpenChange={open => { if (!open) { setImportModalOpen(false); setImportResult(null); } }}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle className="text-base font-semibold flex items-center gap-2">
-                <Upload size={16} className="text-primary" />
-                Import Sections from CSV
-              </DialogTitle>
-              <DialogDescription className="text-sm text-muted-foreground">
-                Review the parsed content before importing.
-              </DialogDescription>
-            </DialogHeader>
-
-            {importResult && (
-              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-                {/* Errors */}
-                {importResult.errors.length > 0 && (
-                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 space-y-1">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-red-700 mb-1.5">
-                      <AlertCircle size={13} /> {importResult.errors.length} error{importResult.errors.length !== 1 ? 's' : ''} — import blocked
-                    </div>
-                    {importResult.errors.map((e, i) => (
-                      <p key={i} className="text-xs text-red-700 font-mono">{e}</p>
-                    ))}
-                  </div>
                 )}
-
-                {/* Warnings */}
                 {importResult.warnings.length > 0 && (
-                  <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 space-y-1">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 mb-1.5">
-                      <AlertTriangle size={13} /> {importResult.warnings.length} warning{importResult.warnings.length !== 1 ? 's' : ''}
-                    </div>
+                  <div className="space-y-1">
                     {importResult.warnings.map((w, i) => (
-                      <p key={i} className="text-xs text-amber-700 font-mono">{w}</p>
+                      <div key={i} className="flex items-start gap-2 text-xs text-amber-700">
+                        <AlertTriangle size={13} className="shrink-0 mt-0.5" /> {w}
+                      </div>
                     ))}
                   </div>
                 )}
-
-                {/* Summary table */}
-                {importResult.sections.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-foreground mb-2">
-                      {importResult.sections.length} section{importResult.sections.length !== 1 ? 's' : ''} · {importResult.sections.reduce((n, s) => n + s.questions.length, 0)} questions total
-                    </p>
-                    <div className="rounded-lg border overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="bg-muted/40 border-b">
-                            <th className="px-3 py-2 text-left text-muted-foreground font-medium">Section</th>
-                            <th className="px-3 py-2 text-right text-muted-foreground font-medium w-20">Weight</th>
-                            <th className="px-3 py-2 text-right text-muted-foreground font-medium w-24">Questions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {importResult.sections.map(sec => (
-                            <tr key={sec.id}>
-                              <td className="px-3 py-2 text-foreground">{sec.name}</td>
-                              <td className="px-3 py-2 text-right text-muted-foreground">{sec.weight}%</td>
-                              <td className="px-3 py-2 text-right text-muted-foreground">{sec.questions.length}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                {importResult.errors.length === 0 && (
+                  <div className="flex items-start gap-2 text-xs text-emerald-700">
+                    <Check size={13} className="shrink-0 mt-0.5" />
+                    {importResult.sections.length} section{importResult.sections.length !== 1 ? 's' : ''},{' '}
+                    {importResult.sections.reduce((n, s) => n + s.questions.length, 0)} questions ready to import.
                   </div>
                 )}
-
-                {/* Import mode toggle */}
-                {importResult.sections.length > 0 && importResult.errors.length === 0 && (
-                  <div className="flex items-center gap-3 pt-1">
-                    <span className="text-xs font-medium text-foreground">Import mode:</span>
-                    <div className="flex rounded-lg border overflow-hidden text-xs">
-                      {(['replace', 'append'] as const).map(mode => (
-                        <button
-                          key={mode}
-                          onClick={() => setImportMode(mode)}
-                          className={`px-3 py-1.5 capitalize transition-colors ${
-                            importMode === mode
-                              ? 'bg-primary text-primary-foreground font-semibold'
-                              : 'bg-background text-muted-foreground hover:bg-muted/60'
-                          }`}
-                        >
-                          {mode}
-                        </button>
-                      ))}
-                    </div>
-                    <span className="text-[11px] text-muted-foreground">
-                      {importMode === 'replace'
-                        ? 'Replaces all existing sections'
-                        : 'Adds to existing sections'}
-                    </span>
+                {importResult.errors.length === 0 && (
+                  <div className="flex gap-2 pt-1">
+                    {(['replace', 'append'] as const).map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setImportMode(m)}
+                        className={`flex-1 rounded-lg border py-2 text-xs font-medium transition-colors ${
+                          importMode === m ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {m === 'replace' ? 'Replace all sections' : 'Append to existing'}
+                      </button>
+                    ))}
                   </div>
                 )}
-              </div>
+              </>
             )}
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+            <Button
+              onClick={handleConfirmImport}
+              disabled={!importResult || importResult.errors.length > 0}
+            >
+              Confirm Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button variant="ghost" size="sm">Cancel</Button>
-              </DialogClose>
-              <Button
-                size="sm"
-                onClick={handleConfirmImport}
-                disabled={!importResult || importResult.errors.length > 0 || importResult.sections.length === 0}
-              >
-                <Upload size={13} className="mr-1.5" /> Import
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* ── Activate Confirmation Dialog ── */}
-        <Dialog open={activateOpen} onOpenChange={setActivateOpen}>
-          <DialogContent hideClose>
-            <DialogHeader>
-              <DialogTitle className="text-base font-semibold flex items-center gap-2">
-                <Zap size={16} className="text-amber-500" />
-                Activate Template?
-              </DialogTitle>
-              <DialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed">
-                This will <strong>freeze the template</strong> — no further edits can be made to this version.
-                A new version (<strong>v{(parseFloat(version) + 0.1).toFixed(1)}</strong>) will be created if you need to make changes later.
-              </DialogDescription>
-              <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
-                Events already using this template will continue working. New events will reference this activated version.
-              </div>
-            </DialogHeader>
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button variant="outline" size="sm">Cancel</Button>
-              </DialogClose>
-              <Button size="sm" onClick={handleActivateConfirm}>
-                <Zap size={13} className="mr-1.5" /> Yes, Activate
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+      <Button variant="ghost" size="sm" className="hidden" onClick={handleDownloadTemplate}>
+        Download Template CSV
+      </Button>
     </TooltipProvider>
   );
+}
+
+// ─── Keyed wrapper (forces full remount when templateId changes) ──────────────
+
+export function KeyedTemplateBuilder() {
+  const { id } = useParams<{ id: string }>();
+  return <TemplateBuilder key={id} />;
 }

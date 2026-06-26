@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/context/ToastContext';
 import type { AssessmentEvent } from '@/types';
+import { resultsByEventId } from '@/services/resultsMockData';
+import { buildEventResults } from '@/utils/scoring';
 import { cn } from '@/lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -588,8 +590,34 @@ interface RecommendationsTabProps {
 
 export function RecommendationsTab({ event, onNavigateRoadmap }: RecommendationsTabProps) {
   const [recs, setRecs] = useState<Rec[]>(() => {
-    // Show approved cards first, then by gap magnitude (largest first)
-    return [...INITIAL_RECS].sort((a, b) => {
+    // Try to seed from real gap data; fall back to hardcoded mock recs for seed events
+    const data = resultsByEventId[event.id] ?? buildEventResults(event);
+    const baseRecs: Rec[] = data
+      ? data.sections
+          .filter(s => s.achievedScore < s.targetScore)
+          .sort((a, b) => (a.achievedScore - a.targetScore) - (b.achievedScore - b.targetScore))
+          .map((s, i) => {
+            const gap = s.achievedScore - s.targetScore;
+            const gapPct = Math.round(Math.abs(gap) / s.targetScore * 100);
+            const text = `Section "${s.name}" is ${Math.abs(gap).toFixed(1)} points below its target score `
+              + `(achieved ${s.achievedScore.toFixed(1)} vs target ${s.targetScore.toFixed(1)}). `
+              + `A gap of ${gapPct}% indicates this area requires focused improvement. `
+              + `Consider a structured review of current practices, identify root causes of underperformance, `
+              + `and define targeted action items with owners and timelines to close the gap within the next assessment cycle.`;
+            return {
+              id: `gen-${s.id}-${i}`,
+              sectionName: s.name,
+              gapMagnitude: gap,
+              status: 'AI Draft' as const,
+              originalText: text,
+              currentText: text,
+              conversation: [],
+            };
+          })
+      : [...INITIAL_RECS];
+
+    const sorted = baseRecs.length > 0 ? baseRecs : [...INITIAL_RECS];
+    return sorted.sort((a, b) => {
       if (a.status === 'Approved' && b.status !== 'Approved') return -1;
       if (b.status === 'Approved' && a.status !== 'Approved') return 1;
       return a.gapMagnitude - b.gapMagnitude;

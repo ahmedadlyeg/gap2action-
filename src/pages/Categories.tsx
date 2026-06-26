@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, Pencil, Archive, ArchiveRestore, FolderOpen,
@@ -17,7 +17,8 @@ import {
   SheetTitle, SheetDescription, SheetClose,
 } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { categories as seedCategories, templates as seedTemplates } from '@/services/mockData';
+import { templates as seedTemplates } from '@/services/mockData';
+import { getCategories, saveCategory, updateCategory, getTemplates } from '@/services/store';
 import type { Category, CategoryStatus } from '@/types';
 
 // ─── Icon registry ────────────────────────────────────────────────────────────
@@ -324,21 +325,36 @@ export function Categories() {
   const { user } = useAuth();
   const canManage = user?.role === 'admin';
 
-  const [cats, setCats] = useState<Category[]>(seedCategories);
-  const [localTemplates] = useState(seedTemplates);
+  const [cats, setCats] = useState<Category[]>(() => getCategories());
   const [showArchived, setShowArchived] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
 
+  const reload = useCallback(() => {
+    setCats(getCategories());
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('g2a-store-updated', reload);
+    return () => window.removeEventListener('g2a-store-updated', reload);
+  }, [reload]);
+
   const templateCountById = useMemo(() => {
+    const allTpls = getTemplates();
     const map: Record<string, number> = {};
-    localTemplates.forEach(t => {
+    allTpls.forEach(t => {
       if (t.status !== 'Archived') {
         map[t.categoryId] = (map[t.categoryId] ?? 0) + 1;
       }
     });
+    // also count seed templates not in store (shouldn't happen once store is primed)
+    seedTemplates.forEach(t => {
+      if (t.status !== 'Archived' && !allTpls.find(x => x.id === t.id)) {
+        map[t.categoryId] = (map[t.categoryId] ?? 0) + 1;
+      }
+    });
     return map;
-  }, [localTemplates]);
+  }, [cats]); // re-derive when cats changes (store update)
 
   const visible = useMemo(
     () => cats.filter(c => showArchived || c.status !== 'Archived'),
@@ -352,7 +368,7 @@ export function Categories() {
 
   const handleSave = (data: CatFormData) => {
     if (editing) {
-      setCats(prev => prev.map(c => c.id === editing.id ? { ...c, ...data } : c));
+      updateCategory(editing.id, data);
     } else {
       const newCat: Category = {
         id: uid(),
@@ -360,17 +376,16 @@ export function Categories() {
         templateCount: 0,
         createdAt: new Date().toISOString(),
       };
-      setCats(prev => [...prev, newCat]);
+      saveCategory(newCat);
     }
+    reload();
     setSheetOpen(false);
   };
 
   const toggleArchive = (cat: Category) => {
-    setCats(prev => prev.map(c =>
-      c.id === cat.id
-        ? { ...c, status: c.status === 'Archived' ? 'Active' : 'Archived' }
-        : c
-    ));
+    const newStatus = cat.status === 'Archived' ? 'Active' : 'Archived';
+    updateCategory(cat.id, { status: newStatus as CategoryStatus });
+    reload();
   };
 
   const handleCardClick = (cat: Category) => {
@@ -435,15 +450,15 @@ export function Categories() {
             ))}
           </div>
         )}
-
-        <CatSheet
-          open={sheetOpen}
-          onClose={() => setSheetOpen(false)}
-          editing={editing}
-          existingNames={existingNames}
-          onSave={handleSave}
-        />
       </div>
+
+      <CatSheet
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        editing={editing}
+        existingNames={existingNames}
+        onSave={handleSave}
+      />
     </TooltipProvider>
   );
 }

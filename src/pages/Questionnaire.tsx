@@ -13,13 +13,13 @@ import {
   Dialog, DialogContent, DialogHeader, DialogFooter,
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
-import { events as seedEvents, currentUser } from '@/services/mockData';
-import { getEvents, getTemplateSections, getSubmission, saveSubmission, updateEvent, getUserAssignedSections, getReturnFeedback, saveRespondentAction, getRespondentAction, getTemplate } from '@/services/store';
+import { getEvent, getEvents, getTemplateSections, getSubmission, saveSubmission, updateEvent, getUserAssignedSections, getReturnFeedback, saveRespondentAction, getRespondentAction, getTemplate } from '@/services/store';
 import { cn } from '@/lib/utils';
+import { scoreAnswer, getMaturityLabel } from '@/utils/scoring';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type QuestionType = 'single-choice' | 'multi-choice' | 'rating-scale' | 'yes-no' | 'free-text';
+type QuestionType = 'single-choice' | 'multi-choice' | 'rating-scale' | 'yes-no' | 'free-text' | 'yes-no-partial' | 'percentage' | 'frequency';
 type AnswerValue = string | string[] | number | null;
 
 interface QuestionOption { id: string; text: string }
@@ -193,7 +193,8 @@ function isAnswered(q: QuestionnaireQuestion, answers: Record<string, AnswerValu
   if (q.type === 'multi-choice') return Array.isArray(v) && v.length > 0;
   if (q.type === 'free-text') return typeof v === 'string' && v.trim().length > 0;
   if (q.type === 'rating-scale') return typeof v === 'number' && v >= 1;
-  return typeof v === 'string' && v.length > 0;
+  if (q.type === 'percentage') return typeof v === 'number' && v >= 0;
+  return typeof v === 'string' && v.length > 0;  // yes-no, yes-no-partial, frequency, single-choice
 }
 
 function sectionStatus(section: QuestionnaireSection, answers: Record<string, AnswerValue>): 'empty' | 'partial' | 'complete' {
@@ -512,6 +513,124 @@ function FreeTextAnswer({
   );
 }
 
+// ─── Yes / No / Partial ──────────────────────────────────────────────────────
+
+function YesNoPartial({
+  value,
+  onChange,
+}: { value: AnswerValue; onChange: (v: string) => void }) {
+  const selected = typeof value === 'string' ? value : null;
+  const opts = [
+    { key: 'yes', label: '✓  Yes', active: 'border-emerald-500 bg-emerald-50 text-emerald-700 shadow-md', hover: 'hover:border-emerald-300 hover:bg-emerald-50/50' },
+    { key: 'partial', label: '~  Partial', active: 'border-amber-400 bg-amber-50 text-amber-700 shadow-md', hover: 'hover:border-amber-300 hover:bg-amber-50/50' },
+    { key: 'no', label: '✕  No', active: 'border-red-400 bg-red-50 text-red-700 shadow-md', hover: 'hover:border-red-300 hover:bg-red-50/50' },
+  ] as const;
+
+  return (
+    <div className="flex gap-3 mt-5">
+      {opts.map(opt => {
+        const active = selected === opt.key;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onChange(opt.key)}
+            className={cn(
+              'flex-1 rounded-xl border-2 py-5 text-sm font-semibold transition-all',
+              active ? opt.active : `border-border text-muted-foreground ${opt.hover}`,
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Percentage Slider ────────────────────────────────────────────────────────
+
+function PercentageInput({
+  value,
+  onChange,
+}: { value: AnswerValue; onChange: (v: number) => void }) {
+  const pct = typeof value === 'number' ? value : 0;
+
+  return (
+    <div className="mt-5 space-y-3">
+      <div className="flex items-center gap-4">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={pct}
+          onChange={e => onChange(Number(e.target.value))}
+          className="flex-1 accent-primary h-2 cursor-pointer"
+        />
+        <div className="flex items-center gap-1 w-20 shrink-0">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={pct}
+            onChange={e => onChange(Math.min(100, Math.max(0, Number(e.target.value))))}
+            className="w-14 rounded-md border border-input bg-background px-2 py-1 text-sm text-center font-semibold text-foreground"
+          />
+          <span className="text-sm text-muted-foreground">%</span>
+        </div>
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-foreground px-0.5">
+        <span>0%</span>
+        <span>25%</span>
+        <span>50%</span>
+        <span>75%</span>
+        <span>100%</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Frequency ────────────────────────────────────────────────────────────────
+
+const FREQUENCY_OPTIONS = [
+  { key: 'never', label: 'Never', color: 'border-red-400 bg-red-50 text-red-700' },
+  { key: 'rarely', label: 'Rarely', color: 'border-orange-400 bg-orange-50 text-orange-700' },
+  { key: 'sometimes', label: 'Sometimes', color: 'border-amber-400 bg-amber-50 text-amber-700' },
+  { key: 'often', label: 'Often', color: 'border-sky-400 bg-sky-50 text-sky-700' },
+  { key: 'always', label: 'Always', color: 'border-emerald-500 bg-emerald-50 text-emerald-700' },
+] as const;
+
+function FrequencyInput({
+  value,
+  onChange,
+}: { value: AnswerValue; onChange: (v: string) => void }) {
+  const selected = typeof value === 'string' ? value : null;
+
+  return (
+    <div className="flex gap-2 mt-5 flex-wrap">
+      {FREQUENCY_OPTIONS.map(opt => {
+        const active = selected === opt.key;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onChange(opt.key)}
+            className={cn(
+              'flex-1 min-w-[80px] rounded-xl border-2 py-4 text-xs font-semibold transition-all',
+              active
+                ? `${opt.color} shadow-md`
+                : 'border-border text-muted-foreground hover:bg-muted/40',
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Question Block ───────────────────────────────────────────────────────────
 
 function QuestionBlock({
@@ -594,6 +713,24 @@ function QuestionBlock({
             onChange={v => onAnswer(question.id, v)}
           />
         )}
+        {question.type === 'yes-no-partial' && (
+          <YesNoPartial
+            value={value}
+            onChange={v => onAnswer(question.id, v)}
+          />
+        )}
+        {question.type === 'percentage' && (
+          <PercentageInput
+            value={value}
+            onChange={v => onAnswer(question.id, v)}
+          />
+        )}
+        {question.type === 'frequency' && (
+          <FrequencyInput
+            value={value}
+            onChange={v => onAnswer(question.id, v)}
+          />
+        )}
         {question.type === 'free-text' && (
           <FreeTextAnswer
             value={value}
@@ -643,7 +780,7 @@ function SuccessScreen({ eventName, onHome, revisionMode }: { eventName: string;
 
 function buildSections(eventId: string | undefined): QuestionnaireSection[] {
   if (!eventId) return SECTIONS;
-  const allEventsMap = new globalThis.Map([...seedEvents, ...getEvents()].map(e => [e.id, e]));
+  const allEventsMap = new globalThis.Map(getEvents().map(e => [e.id, e]));
   const event = allEventsMap.get(eventId);
   if (!event) return SECTIONS;
   const stored = getTemplateSections(event.templateId);
@@ -676,8 +813,8 @@ export function Questionnaire() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isPreview = searchParams.get('mode') === 'preview';
-  const userId = user?.id ?? currentUser.id;
-  const allEventsMap = new globalThis.Map([...seedEvents, ...getEvents()].map(e => [e.id, e]));
+  const userId = user?.id ?? 'u1';
+  const allEventsMap = new globalThis.Map(getEvents().map(e => [e.id, e]));
   const event = id ? allEventsMap.get(id) : undefined;
 
   const sections = buildSections(id);
@@ -722,6 +859,20 @@ export function Questionnaire() {
   const answersRef = useRef(answers);
   answersRef.current = answers;
 
+  // Evidence ref (keeps autosave closure fresh) and key
+  const evidenceRef = useRef(evidence);
+  useEffect(() => { evidenceRef.current = evidence; }, [evidence]);
+  const evidenceKey = `g2a-evidence-${id}-${userId}`;
+
+  // Per-framework score calculation
+  const framework = event?.frameworkId ? undefined : undefined; // loaded below if needed
+  const calculateScore = (ans: Record<string, AnswerValue>): number => {
+    const allQs = visibleSections.flatMap(s => s.questions);
+    if (allQs.length === 0) return 0;
+    const scores = allQs.map(q => scoreAnswer(q, ans[q.id] ?? null));
+    return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+  };
+
   // ── Auto-save every 30s ──
   useEffect(() => {
     const interval = setInterval(() => {
@@ -734,14 +885,16 @@ export function Questionnaire() {
       if (id) {
         saveSubmission(id, userId, {
           eventId: id, userId: userId,
-          answers: current, completionPct: pct, status: 'In Progress',
+          answers: current, evidence: evidenceRef.current,
+          completionPct: pct, status: 'In Progress',
         });
+        const liveEvent = getEvent(id);
         updateEvent(id, {
-          respondentProgress: event?.respondentProgress.map(p =>
+          respondentProgress: (liveEvent?.respondentProgress ?? []).map(p =>
             p.userId === userId
               ? { ...p, completionPct: pct, status: 'In Progress', lastActivity: new Date().toISOString() }
               : p
-          ) ?? [],
+          ),
         });
       }
       setTimeout(() => { setSaving(false); setLastSaved(new Date()); }, 600);
@@ -769,8 +922,13 @@ export function Questionnaire() {
   }, []);
 
   const handleRemoveEvidence = useCallback((qId: string, fileId: string) => {
-    setEvidence(prev => ({ ...prev, [qId]: (prev[qId] ?? []).filter(f => f.id !== fileId) }));
-  }, []);
+    setEvidence(prev => {
+      const next = { ...prev, [qId]: (prev[qId] ?? []).filter(f => f.id !== fileId) };
+      evidenceRef.current = next;
+      try { localStorage.setItem(`g2a-evidence-${id}-${userId}`, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, [id, userId]);
 
   const manualSave = () => {
     setSaving(true);
@@ -782,12 +940,13 @@ export function Questionnaire() {
       saveSubmission(id, userId, {
         eventId: id, userId, answers, completionPct: pct, status: 'In Progress',
       });
+      const liveEvent = getEvent(id);
       updateEvent(id, {
-        respondentProgress: event?.respondentProgress.map(p =>
+        respondentProgress: (liveEvent?.respondentProgress ?? []).map(p =>
           p.userId === userId
             ? { ...p, completionPct: pct, status: 'In Progress', lastActivity: new Date().toISOString() }
             : p
-        ) ?? [],
+        ),
       });
     }
     setTimeout(() => { setSaving(false); setLastSaved(new Date()); }, 600);
@@ -796,17 +955,26 @@ export function Questionnaire() {
   const handleConfirmSubmit = () => {
     if (id) {
       const now = new Date().toISOString();
+      const finalScore = calculateScore(answers);
+      const maturity = getMaturityLabel(finalScore);
       saveSubmission(id, userId, {
         eventId: id, userId: userId,
-        answers, completionPct: 100, status: 'Submitted',
+        answers, evidence: evidenceRef.current,
+        completionPct: 100, status: 'Submitted',
+        score: finalScore,
         submittedAt: now,
       });
+      // Persist score + maturity back to the event for dashboard display
+      const scoreableSubmissions = [finalScore]; // extend if aggregating multiple respondents
+      const avgScore = Math.round(scoreableSubmissions.reduce((s, n) => s + n, 0) / scoreableSubmissions.length);
+      updateEvent(id, { score: avgScore, maturityLevel: maturity as import('@/types').MaturityLevel });
+      const liveEventOnSubmit = getEvent(id);
       updateEvent(id, {
-        respondentProgress: event?.respondentProgress.map(p =>
+        respondentProgress: (liveEventOnSubmit?.respondentProgress ?? []).map(p =>
           p.userId === userId
             ? { ...p, completionPct: 100, status: 'Submitted', lastActivity: now }
             : p
-        ) ?? [],
+        ),
       });
       // In revision mode: clear the return action so the assessor sees a fresh submission
       if (isRevisionMode) {
@@ -820,6 +988,7 @@ export function Questionnaire() {
       }
     }
     localStorage.removeItem(storageKey);
+    localStorage.removeItem(evidenceKey);
     setSubmitted(true);
     setSubmitOpen(false);
   };
@@ -960,226 +1129,182 @@ export function Questionnaire() {
                     )}
                   >
                     <CompletionDot status={status} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold leading-snug">{section.name}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold truncate">{section.name}</p>
                       <p className="text-[10px] text-muted-foreground mt-0.5">
-                        {section.questions.filter(q => q.required).length} question{section.questions.filter(q => q.required).length !== 1 ? 's' : ''}
+                        {section.questions.filter(q => isAnswered(q, answers)).length}/
+                        {section.questions.filter(q => q.required).length} required
                       </p>
                     </div>
                   </button>
                 );
               })}
             </nav>
-
-            {/* Overall completion legend */}
-            <div className="p-4 border-t space-y-1.5">
-              {[
-                { status: 'complete' as const, label: 'Complete' },
-                { status: 'partial' as const, label: 'In progress' },
-                { status: 'empty' as const, label: 'Not started' },
-              ].map(({ status, label }) => (
-                <div key={status} className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                  <CompletionDot status={status} />
-                  {label}
-                </div>
-              ))}
-            </div>
           </aside>
 
           {/* ── Main content ── */}
           <main ref={mainRef} className="flex-1 overflow-y-auto">
 
-            {/* ── Cover / intro screen ── */}
-            {currentIdx === -1 && cover && (
-              <div className="max-w-2xl mx-auto px-8 py-12 flex flex-col items-center text-center">
-                {cover.coverImageUrl && (
-                  <img
-                    src={cover.coverImageUrl}
-                    alt={cover.name}
-                    className="w-full max-h-52 object-cover rounded-2xl mb-8 shadow-md"
-                  />
-                )}
-                <h1
-                  className="text-4xl font-semibold text-foreground mb-3"
-                  style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
-                >
-                  {cover.name}
-                </h1>
-                {cover.tagline && (
-                  <p className="text-lg italic text-muted-foreground mb-6">{cover.tagline}</p>
-                )}
-                {cover.definition && (
-                  <p className="text-sm text-foreground leading-relaxed mb-4 max-w-xl">{cover.definition}</p>
-                )}
-                {cover.explanation && (
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-8 max-w-xl">{cover.explanation}</p>
-                )}
-                {visibleSections.length > 0 && (
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground mb-8">
-                    <span>{visibleSections.length} section{visibleSections.length !== 1 ? 's' : ''}</span>
-                    <span>·</span>
-                    <span>{visibleSections.reduce((n, s) => n + s.questions.length, 0)} questions</span>
-                    <span>·</span>
-                    <span>~{Math.ceil(visibleSections.reduce((n, s) => n + s.questions.length, 0) * 1.5)} min</span>
+            {/* ── Revision mode banner ── */}
+            {isRevisionMode && !isPreview && (
+              <div className="mx-6 mt-6 mb-0 rounded-xl border border-amber-300 bg-amber-50 p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">
+                      This submission was returned for revision
+                    </p>
+                    {returnFeedback && (
+                      <p className="mt-1 text-sm text-amber-700 leading-relaxed">
+                        {returnFeedback}
+                      </p>
+                    )}
+                    <p className="mt-2 text-xs text-amber-600">
+                      Please review your answers and resubmit when ready.
+                    </p>
                   </div>
-                )}
-                <Button size="lg" onClick={() => setCurrentIdx(0)}>
-                  Begin Assessment →
-                </Button>
+                </div>
               </div>
             )}
 
-            <div className="max-w-2xl mx-auto px-8 py-8" style={{ display: currentIdx === -1 ? 'none' : undefined }}>
-
-              {/* Revision mode banner */}
-              {isRevisionMode && returnFeedback && (
-                <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-amber-800">Your submission was returned for revision</p>
-                      <p className="text-xs font-medium text-amber-700 mt-2">Assessor feedback:</p>
-                      <p className="text-sm text-amber-900 mt-0.5 leading-relaxed">"{returnFeedback}"</p>
-                      <p className="text-xs text-amber-700 mt-3">
-                        All your previous answers are pre-loaded. Review the feedback, update your answers, and resubmit.
-                      </p>
-                    </div>
+            {/* ── Cover / intro page ── */}
+            {currentIdx === -1 && cover && (
+              <div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
+                {cover.coverImageUrl && (
+                  <div className="rounded-2xl overflow-hidden border aspect-video bg-muted">
+                    <img
+                      src={cover.coverImageUrl}
+                      alt={cover.name}
+                      className="w-full h-full object-cover"
+                    />
                   </div>
+                )}
+                <div>
+                  <h1
+                    className="text-3xl font-bold text-foreground"
+                    style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+                  >
+                    {cover.name}
+                  </h1>
+                  {cover.tagline && (
+                    <p className="mt-2 text-base text-muted-foreground italic">{cover.tagline}</p>
+                  )}
                 </div>
-              )}
-
-              {/* Partial-assignment banner */}
-              {visibleSections.length < sections.length && (
-                <div className="mb-6 flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800">
-                  <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
-                  </svg>
-                  <span>
-                    You are responding to <strong>{visibleSections.length}</strong> of <strong>{sections.length}</strong> sections assigned to your role in this assessment.
-                  </span>
+                {cover.definition && (
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide mb-1">
+                      Definition
+                    </h2>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{cover.definition}</p>
+                  </div>
+                )}
+                {cover.explanation && (
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide mb-1">
+                      About This Assessment
+                    </h2>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{cover.explanation}</p>
+                  </div>
+                )}
+                <div className="pt-2">
+                  <Button onClick={() => setCurrentIdx(0)}>
+                    Start Assessment <ChevronRight size={15} className="ml-1.5" />
+                  </Button>
                 </div>
-              )}
-
-              {/* Section header */}
-              {currentSection && (
-              <div className="mb-8">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                  <span className="font-medium">Section {currentIdx + 1} of {visibleSections.length}</span>
-                  <span>·</span>
-                  <span>{currentSection.questions.filter(q => isAnswered(q, answers)).length} of {currentSection.questions.filter(q => q.required).length} answered</span>
-                </div>
-                <h1 className="text-xl font-bold text-foreground">{currentSection.name}</h1>
-                <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{currentSection.description}</p>
               </div>
-              )}
+            )}
 
-              {/* Questions */}
-              <div className="space-y-6">
-                {(currentSection?.questions ?? []).map((q, idx) => (
-                  <QuestionBlock
-                    key={q.id}
-                    question={q}
-                    index={idx}
-                    total={currentSection?.questions.length ?? 0}
-                    answers={answers}
-                    evidence={evidence}
-                    onAnswer={handleAnswer}
-                    onAddEvidence={handleAddEvidence}
-                    onRemoveEvidence={handleRemoveEvidence}
-                  />
-                ))}
-              </div>
+            {/* ── Section content ── */}
+            {currentSection && (
+              <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
 
-              {/* Navigation */}
-              <div className="flex items-center justify-between mt-10 pt-6 border-t">
-                <Button
-                  variant="outline"
-                  onClick={() => setCurrentIdx(i => i - 1)}
-                  disabled={isFirst}
-                  className="gap-2"
-                >
-                  <ChevronLeft size={15} /> Previous
-                </Button>
+                {/* Section header */}
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                    Section {currentIdx + 1} of {visibleSections.length}
+                  </p>
+                  <h2 className="text-xl font-bold text-foreground">{currentSection.name}</h2>
+                  {currentSection.description && (
+                    <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
+                      {currentSection.description}
+                    </p>
+                  )}
+                </div>
 
-                <div className="flex items-center gap-2">
-                  {isPreview ? (
-                    /* In preview mode show only section navigation, no submit */
-                    !isLast && (
-                      <Button onClick={() => setCurrentIdx(i => i + 1)} className="gap-2">
-                        Next Section <ChevronRight size={15} />
-                      </Button>
-                    )
-                  ) : isLast ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className={!allComplete ? 'cursor-not-allowed' : ''}>
-                          <Button
-                            disabled={!allComplete}
-                            onClick={() => setSubmitOpen(true)}
-                            className={cn('gap-2', !allComplete && 'pointer-events-none')}
-                          >
-                            <Send size={14} /> {isRevisionMode ? 'Resubmit Assessment' : 'Submit Assessment'}
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      {!allComplete && (
-                        <TooltipContent>Complete all sections before submitting</TooltipContent>
-                      )}
-                    </Tooltip>
+                {/* Question blocks */}
+                <div className="space-y-5">
+                  {currentSection.questions.map((q, idx) => (
+                    <QuestionBlock
+                      key={q.id}
+                      question={q}
+                      index={idx}
+                      total={currentSection.questions.length}
+                      answers={answers}
+                      evidence={evidence}
+                      onAnswer={handleAnswer}
+                      onAddEvidence={handleAddEvidence}
+                      onRemoveEvidence={handleRemoveEvidence}
+                    />
+                  ))}
+                </div>
+
+                {/* Section footer nav */}
+                <div className="flex items-center justify-between pt-4 pb-10">
+                  <Button
+                    variant="outline"
+                    onClick={() => setCurrentIdx(i => (hasCover ? i - 1 : Math.max(0, i - 1)))}
+                    disabled={isFirst && !hasCover}
+                  >
+                    <ChevronLeft size={15} className="mr-1.5" /> Previous
+                  </Button>
+
+                  {isLast ? (
+                    <Button
+                      onClick={() => setSubmitOpen(true)}
+                      disabled={!allComplete || isPreview}
+                    >
+                      <Send size={14} className="mr-2" />
+                      {isRevisionMode ? 'Resubmit Assessment' : 'Submit Assessment'}
+                    </Button>
                   ) : (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className={!sectionComplete ? 'cursor-not-allowed' : ''}>
-                          <Button
-                            disabled={!sectionComplete}
-                            onClick={() => setCurrentIdx(i => i + 1)}
-                            className={cn('gap-2', !sectionComplete && 'pointer-events-none')}
-                          >
-                            Next Section <ChevronRight size={15} />
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      {!sectionComplete && (
-                        <TooltipContent>Please answer all questions to continue</TooltipContent>
-                      )}
-                    </Tooltip>
+                    <Button onClick={() => setCurrentIdx(i => i + 1)}>
+                      Next <ChevronRight size={15} className="ml-1.5" />
+                    </Button>
                   )}
                 </div>
               </div>
-            </div>
+            )}
           </main>
         </div>
       </div>
 
       {/* ── Submit confirmation dialog ── */}
       <Dialog open={submitOpen} onOpenChange={setSubmitOpen}>
-        <DialogContent hideClose>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
-              <Send size={16} className="text-primary" />
-              {isRevisionMode ? 'Resubmit Assessment?' : 'Submit Assessment?'}
+            <DialogTitle>
+              {isRevisionMode ? 'Resubmit Assessment' : 'Submit Assessment'}
             </DialogTitle>
-            <DialogDescription asChild>
-              <div className="space-y-3 mt-2">
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  You are about to submit your assessment. <strong>You will not be able to edit your answers after submission.</strong>
-                </p>
-                <div className="rounded-lg bg-muted/50 border px-4 py-3 space-y-1 text-sm">
-                  <p className="font-medium text-foreground">{eventName}</p>
-                  <p className="text-muted-foreground text-xs">
-                    {visibleSections.length} sections · {visibleSections.reduce((n, s) => n + s.questions.length, 0)} questions
-                  </p>
-                </div>
-                <p className="text-sm text-muted-foreground">Are you sure you want to submit?</p>
-              </div>
+            <DialogDescription>
+              {isRevisionMode
+                ? 'Your revised answers will be sent back to the assessor for final review.'
+                : 'Once submitted, your answers will be locked until the assessor reviews them.'
+              }
             </DialogDescription>
           </DialogHeader>
+          {!allComplete && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+              <span>Some required questions are still unanswered. Please complete all sections before submitting.</span>
+            </div>
+          )}
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline" size="sm">Cancel</Button>
+              <Button variant="outline">Cancel</Button>
             </DialogClose>
-            <Button size="sm" onClick={handleConfirmSubmit}>
-              <Send size={13} className="mr-1.5" /> {isRevisionMode ? 'Resubmit' : 'Submit Assessment'}
+            <Button onClick={handleConfirmSubmit} disabled={!allComplete}>
+              <Send size={14} className="mr-2" />
+              {isRevisionMode ? 'Confirm Resubmit' : 'Confirm Submit'}
             </Button>
           </DialogFooter>
         </DialogContent>

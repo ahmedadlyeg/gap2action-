@@ -13,29 +13,15 @@ import {
   DialogDescription, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
 import { users } from '@/services/mockData';
-import type { AssessmentEvent } from '@/types';
+import type { AssessmentEvent, Task, TaskEffort } from '@/types';
+import { getEventTasks, saveTask as storeSaveTask, deleteTask as storeDeleteTask } from '@/services/store';
 import { cn } from '@/lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type TaskStatus = 'Not Started' | 'In Progress' | 'Done' | 'Blocked';
-type Effort = 'Small' | 'Medium' | 'Large';
-
-interface GanttTask {
-  id: string;
-  title: string;
-  description: string;
-  progressNotes: string;
-  recId: string;
-  recName: string;
-  gapWeight: number;
-  status: TaskStatus;
-  effort: Effort;
-  assigneeId?: string;
-  startDate: string;   // 'YYYY-MM-DD'
-  dueDate: string;     // 'YYYY-MM-DD'
-  dependsOn: string[]; // task IDs
-}
+type Effort = TaskEffort;
+type GanttTask = Task;
 
 interface RecGroup {
   recId: string;
@@ -52,7 +38,7 @@ const REC_GROUPS: RecGroup[] = [
   { recId: 'rg3', recName: 'Data Architecture',       gapWeight: 0.6, color: '#14b8a6' },
 ];
 
-const SEED_TASKS: GanttTask[] = [
+const SEED_TASKS: Omit<GanttTask, 'eventId' | 'priority' | 'completionPct' | 'createdAt'>[] = [
   // Technology & Data
   { id: 't1', title: 'Run application discovery sprint',   recId: 'rg1', recName: 'Technology & Data',       gapWeight: 1.2, status: 'In Progress',  effort: 'Large',  assigneeId: 'u1', startDate: '2026-06-15', dueDate: '2026-07-10', dependsOn: [],     description: 'Two-week sprint to document all production systems.', progressNotes: '60% complete — 4 of 7 business units covered.' },
   { id: 't2', title: 'Document portfolio inventory',       recId: 'rg1', recName: 'Technology & Data',       gapWeight: 1.2, status: 'Not Started',  effort: 'Medium', assigneeId: 'u3', startDate: '2026-07-05', dueDate: '2026-07-31', dependsOn: ['t1'], description: 'Produce structured inventory with lifecycle status.', progressNotes: '' },
@@ -691,11 +677,12 @@ interface AiGenerateModalProps {
   existingTasks: GanttTask[];
   recId: string;
   gapWeight: number;
+  eventId: string;
   onAdd: (tasks: GanttTask[]) => void;
   onClose: () => void;
 }
 
-function AiGenerateModal({ recName, existingTasks, recId, gapWeight, onAdd, onClose }: AiGenerateModalProps) {
+function AiGenerateModal({ recName, existingTasks, recId, gapWeight, eventId, onAdd, onClose }: AiGenerateModalProps) {
   const [loading, setLoading] = useState(true);
   const [suggestions, setSuggestions] = useState<SuggestedTask[]>([]);
 
@@ -727,18 +714,22 @@ function AiGenerateModal({ recName, existingTasks, recId, gapWeight, onAdd, onCl
       .filter(s => s.title.trim())
       .map(s => ({
         id: uid(),
+        eventId,
         title: s.title.trim(),
         description: '',
         progressNotes: '',
         recId,
         recName,
         gapWeight,
-        status: 'Not Started',
+        status: 'Not Started' as TaskStatus,
         effort: s.effort,
         assigneeId: undefined,
+        priority: 'Medium' as const,
         startDate: start,
         dueDate: defaultDue,
         dependsOn: s.dependsOn ? [s.dependsOn] : [],
+        completionPct: 0,
+        createdAt: new Date().toISOString(),
       }));
 
     onAdd(newTasks);
@@ -856,7 +847,10 @@ interface RoadmapTabProps {
 
 export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: RoadmapTabProps) {
   const { toast } = useToast();
-  const [tasks, setTasks]         = useState<GanttTask[]>(SEED_TASKS);
+  const [tasks, setTasks] = useState<GanttTask[]>(() => {
+    const stored = getEventTasks(event.id);
+    return stored.length > 0 ? stored : [];
+  });
   const [openTask, setOpenTask]   = useState<GanttTask | null>(null);
   const [aiModal, setAiModal]     = useState<{ recName: string; recId: string; gapWeight: number } | null>(null);
 
@@ -872,11 +866,15 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
   }, [pendingRecName, onPendingConsumed]);
 
   function saveTask(updated: GanttTask) {
+    storeDeleteTask(updated.id); // remove first to ensure clean upsert
+    storeSaveTask(updated);
     setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
     toast({ title: 'Task saved', variant: 'success' });
   }
 
   function addTasks(newTasks: GanttTask[]) {
+    newTasks.forEach(t => storeDeleteTask(t.id));
+    newTasks.forEach(t => storeSaveTask(t));
     setTasks(prev => [...prev, ...newTasks]);
     toast({
       title: `${newTasks.length} task${newTasks.length !== 1 ? 's' : ''} added to roadmap`,
@@ -974,6 +972,7 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
           recName={aiModal.recName}
           recId={aiModal.recId}
           gapWeight={aiModal.gapWeight}
+          eventId={event.id}
           existingTasks={tasks}
           onAdd={addTasks}
           onClose={() => setAiModal(null)}

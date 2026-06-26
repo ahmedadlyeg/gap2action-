@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { UserAvatar } from '@/components/ui/avatar';
 import { resultsByEventId } from '@/services/resultsMockData';
+import { buildEventResults } from '@/utils/scoring';
 import { users } from '@/services/mockData';
 import type { AssessmentEvent, Template } from '@/types';
 import { cn } from '@/lib/utils';
@@ -235,7 +236,7 @@ interface ResultsTabProps {
 
 export function ResultsTab({ event, template }: ResultsTabProps) {
   const [showExport, setShowExport] = useState(false);
-  const data = resultsByEventId[event.id];
+  const data = resultsByEventId[event.id] ?? buildEventResults(event);
   const isClosed = event.status === 'Completed' || event.status === 'Closed';
   const MAX_SCORE = 5;
 

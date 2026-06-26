@@ -21,6 +21,10 @@ import { Recommendations } from '@/pages/Recommendations';
 import { Roadmap } from '@/pages/Roadmap';
 import { Compare } from '@/pages/Compare';
 import { Reports } from '@/pages/Reports';
+import { MaturityLevels } from '@/pages/MaturityLevels';
+import { FrameworkList } from '@/pages/FrameworkList';
+import { FrameworkCreate } from '@/pages/FrameworkCreate';
+import { AllTasks } from '@/pages/AllTasks';
 
 function KeyedTemplateBuilder() {
   const { id } = useParams();
@@ -58,12 +62,12 @@ function App() {
                   <Route path="events/:id/roadmap" element={<Roadmap />} />
                   <Route path="events/:id/compare" element={<Compare />} />
                   <Route path="reports" element={<Reports />} />
-
-                  {/* Admin-only */}
-                  <Route element={<ProtectedRoute requiredRole="admin" />}>
-                    <Route path="users" element={<UserManagement />} />
-                  </Route>
-
+                  <Route path="maturity" element={<MaturityLevels />} />
+                  <Route path="frameworks" element={<FrameworkList />} />
+                  <Route path="frameworks/new" element={<FrameworkCreate />} />
+                  <Route path="frameworks/:id/edit" element={<FrameworkCreate />} />
+                  <Route path="users" element={<UserManagement />} />
+                  <Route path="tasks" element={<AllTasks />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Route>
               </Route>

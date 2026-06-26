@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
   ClipboardList, Users, BarChart2, AlertCircle, Map as MapIcon, GitCompare,
   CheckCircle2, MessageSquare, Eye, ArrowRight, CalendarDays,
-  Target, RotateCcw, FileText,
+  Target, RotateCcw, FileText, Paperclip,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,20 +27,20 @@ import { RecommendationsTab } from '@/components/event/RecommendationsTab';
 import { RoadmapTab } from '@/components/event/RoadmapTab';
 import { CompareTab } from '@/components/event/CompareTab';
 import { useToast } from '@/context/ToastContext';
-import { events as seedEvents, templates, users } from '@/services/mockData';
-import { getEvents, getSubmission, saveSubmission, getTemplateSections, saveRespondentAction, getRespondentAction, getReturnFeedback, getUserAssignedSections, getSectionRespondents } from '@/services/store';
+import { getEvents, getTemplates, getUsers, getSubmission, saveSubmission, getTemplateSections, saveRespondentAction, getRespondentAction, getReturnFeedback, getUserAssignedSections, getSectionRespondents, updateEvent } from '@/services/store';
+import { recomputeEventScore, getMaturityLabel } from '@/utils/scoring';
 import type { AssessmentEvent, Template, RespondentProgress, RespondentStatus } from '@/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function userName(uid: string) {
-  return users.find(u => u.id === uid)?.name ?? `User ${uid}`;
+  return getUsers().find(u => u.id === uid)?.name ?? `User ${uid}`;
 }
 function userInitials(uid: string) {
-  return users.find(u => u.id === uid)?.initials ?? '??';
+  return getUsers().find(u => u.id === uid)?.initials ?? '??';
 }
 function userDept(uid: string) {
-  return users.find(u => u.id === uid)?.department ?? '—';
+  return getUsers().find(u => u.id === uid)?.department ?? '—';
 }
 function formatDate(iso?: string) {
   if (!iso) return '—';
@@ -169,7 +169,7 @@ function ViewResponseSheet({
   const visibleSections = allSections.filter(s => assignedIds.includes(s.id));
   const isFiltered = assignedIds.length < allSectionIds.length;
 
-  type QAPair = { qNum: number; text: string; answer: string; type: string };
+  type QAPair = { qNum: number; qId: string; text: string; answer: string; type: string };
   const qaPairs: QAPair[] = [];
 
   if (submission && visibleSections.length > 0) {
@@ -186,7 +186,7 @@ function ViewResponseSheet({
         } else {
           answer = String(raw);
         }
-        qaPairs.push({ qNum, text: q.text, answer, type: q.type });
+        qaPairs.push({ qNum, qId: q.id, text: q.text, answer, type: q.type });
       }
     }
   }
@@ -219,20 +219,34 @@ function ViewResponseSheet({
               <p className="text-xs text-muted-foreground">Could not load questions for this template.</p>
             </div>
           ) : (
-            qaPairs.map((qa) => (
-              <div key={qa.qNum} className="space-y-2">
-                <div className="flex items-start gap-2">
-                  <span className="shrink-0 text-[10px] font-mono text-muted-foreground mt-0.5 w-5">Q{qa.qNum}</span>
-                  <p className="text-xs font-medium text-foreground leading-relaxed">{qa.text}</p>
-                </div>
-                <div className="ml-7 rounded-lg bg-muted/40 border px-3 py-2.5">
-                  <p className="text-sm text-foreground">{qa.answer}</p>
-                  {qa.type === 'text' && qa.answer !== '—' && (
-                    <p className="text-[10px] text-blue-600 mt-1">Free text — AI context only</p>
-                  )}
-                </div>
-              </div>
-            ))
+            qaPairs.map((qa) => {
+                const evidenceFiles = (submission?.evidence as Record<string, { id: string; name: string; size: string }[]> | undefined)?.[qa.qId] ?? [];
+                return (
+                  <div key={qa.qNum} className="space-y-2">
+                    <div className="flex items-start gap-2">
+                      <span className="shrink-0 text-[10px] font-mono text-muted-foreground mt-0.5 w-5">Q{qa.qNum}</span>
+                      <p className="text-xs font-medium text-foreground leading-relaxed">{qa.text}</p>
+                    </div>
+                    <div className="ml-7 rounded-lg bg-muted/40 border px-3 py-2.5">
+                      <p className="text-sm text-foreground">{qa.answer}</p>
+                      {qa.type === 'text' && qa.answer !== '—' && (
+                        <p className="text-[10px] text-blue-600 mt-1">Free text — AI context only</p>
+                      )}
+                    </div>
+                    {evidenceFiles.length > 0 && (
+                      <ul className="ml-7 space-y-1">
+                        {evidenceFiles.map(f => (
+                          <li key={f.id} className="flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-[11px]">
+                            <Paperclip size={11} className="text-muted-foreground shrink-0" />
+                            <span className="flex-1 truncate text-foreground">{f.name}</span>
+                            <span className="text-muted-foreground shrink-0">{f.size}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })
           )}
         </SheetBody>
       </SheetContent>
@@ -311,14 +325,17 @@ type SubmissionsFilter = 'all' | 'pending' | 'not-started' | 'overdue';
 
 export function EventDashboard() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const VALID_TABS = ['overview', 'submissions', 'results', 'gaps', 'recommendations', 'roadmap', 'compare'];
   const allEvents = new Map(
-    [...seedEvents, ...getEvents()].map(e => [e.id, e])
+    getEvents().map(e => [e.id, e])
   );
   const event = id ? allEvents.get(id) : undefined;
-  const template = (event ? templates.find(t => t.id === event.templateId) : null) ?? null;
+  const template = (event ? getTemplates().find(t => t.id === event.templateId) : null) ?? null;
 
   const { toast } = useToast();
-  const [tab, setTab] = useState('overview');
+  const [tab, setTab] = useState(VALID_TABS.includes(tabParam ?? '') ? tabParam! : 'overview');
   const [pendingRecName, setPendingRecName] = useState<string | null>(null);
   const [progress, setProgress] = useState<RespondentProgress[]>(() => {
     const base = event?.respondentProgress ?? [];
@@ -374,6 +391,12 @@ export function EventDashboard() {
       returnCount: existing?.returnCount ?? 0,
       actionAt: now,
     });
+    // Recompute aggregate score across all validated + submitted respondents
+    const aggScore = recomputeEventScore(event);
+    if (aggScore !== undefined) {
+      const maturity = getMaturityLabel(aggScore) as import('@/types').MaturityLevel;
+      updateEvent(event.id, { score: aggScore, maturityLevel: maturity });
+    }
     toast({ title: 'Response validated', variant: 'success' });
   };
 
@@ -757,7 +780,6 @@ export function EventDashboard() {
                                       variant="ghost" size="icon"
                                       className="h-7 w-7 text-muted-foreground hover:text-foreground"
                                       onClick={() => setViewUserId(p.userId)}
-                                      disabled={p.completionPct === 0}
                                     >
                                       <Eye size={14} />
                                     </Button>
@@ -771,19 +793,7 @@ export function EventDashboard() {
                                       <TooltipTrigger asChild>
                                         <Button
                                           variant="ghost" size="icon"
-                                          className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                                          onClick={() => validateUser(p.userId)}
-                                        >
-                                          <CheckCircle2 size={14} />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>Validate</TooltipContent>
-                                    </Tooltip>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button
-                                          variant="ghost" size="icon"
-                                          className="h-7 w-7 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                          className="h-7 w-7 text-muted-foreground hover:text-orange-600"
                                           onClick={() => setReturnUserId(p.userId)}
                                         >
                                           <RotateCcw size={14} />
@@ -791,92 +801,121 @@ export function EventDashboard() {
                                       </TooltipTrigger>
                                       <TooltipContent>Return for Revision</TooltipContent>
                                     </Tooltip>
+
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          variant="ghost" size="icon"
+                                          className="h-7 w-7 text-muted-foreground hover:text-emerald-600"
+                                          onClick={() => validateUser(p.userId)}
+                                        >
+                                          <CheckCircle2 size={14} />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>Validate Response</TooltipContent>
+                                    </Tooltip>
                                   </>
                                 )}
 
                                 {p.status === 'Validated' && (
-                                  <span className="text-[11px] text-emerald-600 flex items-center gap-1 pr-1">
-                                    <CheckCircle2 size={12} /> Done
-                                  </span>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost" size="icon"
+                                        className="h-7 w-7 text-muted-foreground hover:text-orange-600"
+                                        onClick={() => setReturnUserId(p.userId)}
+                                      >
+                                        <RotateCcw size={14} />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Re-open for Revision</TooltipContent>
+                                  </Tooltip>
                                 )}
+
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost" size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-primary"
+                                      asChild
+                                    >
+                                      <a href={`/questionnaire/${event.id}?mode=preview`} target="_blank" rel="noreferrer">
+                                        <FileText size={14} />
+                                      </a>
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Preview Questionnaire</TooltipContent>
+                                </Tooltip>
                               </div>
                             </td>
                           </tr>
                         );
                       })}
-                      {filteredProgress.length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">
-                            No submissions match this filter.
-                          </td>
-                        </tr>
-                      )}
                     </tbody>
                   </table>
+
+                  {filteredProgress.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
+                      <p className="text-sm font-medium text-foreground">No respondents match this filter</p>
+                      <p className="text-xs text-muted-foreground">Try selecting a different filter above.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* RESULTS TAB */}
+            {/* RESULTS */}
             {tab === 'results' && (
-              <ErrorBoundary label="Results">
+              <ErrorBoundary>
                 <ResultsTab event={event} template={template} />
               </ErrorBoundary>
             )}
 
-            {/* GAPS TAB */}
+            {/* GAPS */}
             {tab === 'gaps' && (
-              <ErrorBoundary label="Gaps">
-                <GapsTab event={event} onViewRecommendations={() => setTab('recommendations')} />
+              <ErrorBoundary>
+                <GapsTab event={event} template={template} />
               </ErrorBoundary>
             )}
 
-            {/* RECOMMENDATIONS TAB */}
+            {/* RECOMMENDATIONS */}
             {tab === 'recommendations' && (
-              <ErrorBoundary label="Recommendations">
-                <RecommendationsTab
-                  event={event}
-                  onNavigateRoadmap={(name) => {
-                    setPendingRecName(name ?? null);
-                    setTab('roadmap');
-                  }}
-                />
+              <ErrorBoundary>
+                <RecommendationsTab event={event} template={template} />
               </ErrorBoundary>
             )}
 
-            {/* ROADMAP TAB */}
+            {/* ROADMAP */}
             {tab === 'roadmap' && (
-              <ErrorBoundary label="Roadmap">
-                <RoadmapTab
-                  event={event}
-                  pendingRecName={pendingRecName}
-                  onPendingConsumed={() => setPendingRecName(null)}
-                />
+              <ErrorBoundary>
+                <RoadmapTab event={event} template={template} />
               </ErrorBoundary>
             )}
 
-            {/* COMPARE TAB */}
+            {/* COMPARE */}
             {tab === 'compare' && (
-              <ErrorBoundary label="Compare">
-                <CompareTab event={event} />
+              <ErrorBoundary>
+                <CompareTab event={event} template={template} />
               </ErrorBoundary>
             )}
+
           </div>
         </div>
       </div>
 
-      {/* ── Slide-overs & Dialogs ── */}
+      {/* ── Panels & Dialogs ── */}
       <ViewResponseSheet
         open={viewUserId !== null}
         userId={viewUserId}
         event={event}
         onClose={() => setViewUserId(null)}
       />
+
       <ReturnDialog
         open={returnUserId !== null}
         userId={returnUserId}
         onClose={() => setReturnUserId(null)}
-        onSubmit={feedback => { if (returnUserId) returnUser(returnUserId, feedback); }}
+        onSubmit={feedback => returnUser(returnUserId!, feedback)}
       />
     </TooltipProvider>
   );

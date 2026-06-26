@@ -1,5 +1,6 @@
 import type {
   User, Category, Template, AssessmentEvent, Recommendation, Task, Department, UserGroup,
+  AssessmentFramework,
 } from '@/types';
 
 // ─── Departments ──────────────────────────────────────────────────────────────
@@ -85,6 +86,64 @@ export const categories: Category[] = [
   },
 ];
 
+// ─── Assessment Frameworks ────────────────────────────────────────────────────
+export const frameworks: AssessmentFramework[] = [
+  {
+    id: 'fw1',
+    name: 'EA Maturity Framework',
+    description: 'Comprehensive framework for assessing enterprise architecture maturity across all capability dimensions.',
+    allowedQuestionTypes: ['single-choice', 'multi-choice', 'rating-scale', 'yes-no', 'free-text', 'yes-no-partial', 'percentage', 'frequency'],
+    scoringMethod: 'weighted_section',
+    status: 'Active',
+    createdBy: 'u1',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    maturityLevels: [
+      { level: 1, label: 'Initial', minScore: 0, maxScore: 1.9, description: 'Processes are ad hoc and unpredictable.' },
+      { level: 2, label: 'Developing', minScore: 2.0, maxScore: 2.9, description: 'Practices exist but are inconsistently applied.' },
+      { level: 3, label: 'Defined', minScore: 3.0, maxScore: 3.4, description: 'Processes are documented and standardised.' },
+      { level: 4, label: 'Quantitatively Managed', minScore: 3.5, maxScore: 4.4, description: 'Processes are measured and controlled.' },
+      { level: 5, label: 'Optimising', minScore: 4.5, maxScore: 5.0, description: 'Continuous improvement is institutionalised.' },
+    ],
+  },
+  {
+    id: 'fw2',
+    name: 'Digital Readiness Framework',
+    description: 'Evaluates digital readiness and transformation capability across business and technology dimensions.',
+    allowedQuestionTypes: ['rating-scale', 'yes-no', 'yes-no-partial', 'free-text'],
+    scoringMethod: 'simple_average',
+    status: 'Active',
+    createdBy: 'u1',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    maturityLevels: [
+      { level: 1, label: 'Unaware', minScore: 0, maxScore: 1.9, description: 'No awareness of digital transformation needs.' },
+      { level: 2, label: 'Exploring', minScore: 2.0, maxScore: 2.9, description: 'Beginning to explore digital opportunities.' },
+      { level: 3, label: 'Piloting', minScore: 3.0, maxScore: 3.4, description: 'Running pilot digital initiatives.' },
+      { level: 4, label: 'Scaling', minScore: 3.5, maxScore: 4.4, description: 'Scaling digital capabilities across the organisation.' },
+      { level: 5, label: 'Transforming', minScore: 4.5, maxScore: 5.0, description: 'Fully digitally transformed and continuously evolving.' },
+    ],
+  },
+  {
+    id: 'fw3',
+    name: 'Governance Audit Framework',
+    description: 'Structured audit framework for evaluating governance compliance and policy adherence.',
+    allowedQuestionTypes: ['yes-no', 'yes-no-partial', 'single-choice', 'free-text', 'percentage'],
+    scoringMethod: 'categorical_weight',
+    status: 'Draft',
+    createdBy: 'u1',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    maturityLevels: [
+      { level: 1, label: 'Non-Compliant', minScore: 0, maxScore: 1.9, description: 'Significant governance gaps and policy violations.' },
+      { level: 2, label: 'Partial', minScore: 2.0, maxScore: 2.9, description: 'Some governance controls in place but incomplete.' },
+      { level: 3, label: 'Compliant', minScore: 3.0, maxScore: 3.4, description: 'Meeting minimum governance and compliance requirements.' },
+      { level: 4, label: 'Established', minScore: 3.5, maxScore: 4.4, description: 'Robust governance framework consistently applied.' },
+      { level: 5, label: 'Exemplary', minScore: 4.5, maxScore: 5.0, description: 'Governance best practices with continuous improvement.' },
+    ],
+  },
+];
+
 // ─── Templates ────────────────────────────────────────────────────────────────
 export const templates: Template[] = [
   {
@@ -92,30 +151,35 @@ export const templates: Template[] = [
     description: 'Comprehensive evaluation of enterprise architecture maturity across five domains.',
     assessmentType: 'Maturity', version: '2.1', status: 'Active', questionCount: 42,
     createdBy: 'u1', createdAt: '2026-01-20T09:00:00Z', updatedAt: '2026-04-10T14:30:00Z',
+    frameworkId: 'fw1',
   },
   {
     id: 't2', categoryId: 'cat1', name: 'EA Governance Readiness', code: 'EA-GOV-v1',
     description: 'Targeted assessment of EA governance frameworks, policies, and compliance posture.',
     assessmentType: 'Readiness', version: '1.3', status: 'Active', questionCount: 28,
     createdBy: 'u1', createdAt: '2026-02-05T09:00:00Z', updatedAt: '2026-03-18T11:00:00Z',
+    frameworkId: 'fw1',
   },
   {
     id: 't2b', categoryId: 'cat1', name: 'EA Capability Baseline', code: 'EA-CAP-v1',
     description: 'Baseline capability assessment for EA functions across business units.',
     assessmentType: 'Capability', version: '1.0', status: 'Archived', questionCount: 21,
     createdBy: 'u1', createdAt: '2025-09-01T09:00:00Z', updatedAt: '2025-12-01T10:00:00Z',
+    frameworkId: 'fw1',
   },
   {
     id: 't3', categoryId: 'cat2', name: 'Digital Maturity Index', code: 'DT-MAT-v1',
     description: 'Holistic evaluation of digital capabilities, data maturity, and transformation readiness.',
     assessmentType: 'Maturity', version: '1.0', status: 'Active', questionCount: 35,
     createdBy: 'u2', createdAt: '2026-03-01T09:00:00Z', updatedAt: '2026-04-22T09:00:00Z',
+    frameworkId: 'fw2',
   },
   {
     id: 't4', categoryId: 'cat2', name: 'Innovation Capability Survey', code: 'DT-INN-v1',
     description: "Measures the organization's capacity to ideate, experiment, and scale innovation.",
     version: '0.5', status: 'Draft', questionCount: 18,
     createdBy: 'u2', createdAt: '2026-05-10T09:00:00Z', updatedAt: '2026-06-01T16:00:00Z',
+    frameworkId: 'fw2',
   },
 ];
 

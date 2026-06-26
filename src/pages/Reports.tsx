@@ -1,249 +1,389 @@
-import { useState } from 'react';
-import { Download } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  Download, BarChart2, Users, CheckCircle2, Clock,
+  ChevronDown, ChevronUp, ArrowRight, FileText,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { events as seedEvents, categories, templates } from '@/services/mockData';
-import { resultsByEventId } from '@/services/resultsMockData';
-import { getEvents } from '@/services/store';
-import type { AssessmentEvent } from '@/types';
+import { Progress } from '@/components/ui/progress';
+import { getEvents, getTemplates, getCategories, getUsers, getSubmissions } from '@/services/store';
+import type { AssessmentEvent, Template, Category } from '@/types';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type StatusFilter = 'all' | 'Open' | 'In Progress' | 'Completed' | 'Closed';
+type SortKey = 'name' | 'template' | 'category' | 'completion' | 'score' | 'status';
+type SortDir = 'asc' | 'desc';
+
+interface ReportRow {
+  event: AssessmentEvent;
+  template: Template | undefined;
+  category: Category | undefined;
+  completionPct: number;
+  respondentCount: number;
+  submittedCount: number;
+  validatedCount: number;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatDate(iso?: string) {
+const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'secondary' | 'outline'> = {
+  Open: 'success', 'In Progress': 'warning', Completed: 'secondary',
+  Closed: 'outline', Draft: 'outline', Scheduled: 'outline',
+};
+
+const MATURITY_COLOR: Record<string, string> = {
+  Initial:                 'text-red-600 bg-red-50 border-red-200',
+  Managed:                 'text-orange-600 bg-orange-50 border-orange-200',
+  Defined:                 'text-amber-600 bg-amber-50 border-amber-200',
+  'Quantitatively Managed':'text-blue-600 bg-blue-50 border-blue-200',
+  Optimizing:              'text-emerald-600 bg-emerald-50 border-emerald-200',
+};
+
+function fmt(iso?: string) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function allEvents(): AssessmentEvent[] {
-  const map = new globalThis.Map([...seedEvents, ...getEvents()].map(e => [e.id, e]));
-  return [...map.values()];
-}
-
-function templateName(templateId: string) {
-  return templates.find(t => t.id === templateId)?.name ?? '—';
-}
-
-function categoryForTemplate(templateId: string) {
-  const tpl = templates.find(t => t.id === templateId);
-  if (!tpl) return null;
-  return categories.find(c => c.id === tpl.categoryId) ?? null;
-}
-
-type StatusFilter = 'All' | 'Open' | 'In Progress' | 'Completed' | 'Closed' | 'Draft';
-
-const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
-  Completed: { label: 'Completed', cls: 'bg-emerald-100 text-emerald-700' },
-  Open:       { label: 'Open',      cls: 'bg-green-100 text-green-700' },
-  'In Progress': { label: 'In Progress', cls: 'bg-blue-100 text-blue-700' },
-  Closed:     { label: 'Closed',    cls: 'bg-slate-100 text-slate-600' },
-  Draft:      { label: 'Draft',     cls: 'bg-gray-100 text-gray-500' },
-  Scheduled:  { label: 'Scheduled', cls: 'bg-violet-100 text-violet-700' },
-};
-
-// ─── Export CSV ───────────────────────────────────────────────────────────────
-
-function exportCSV(evts: AssessmentEvent[]) {
-  const headers = ['Event Name', 'Template', 'Status', 'Score', 'Maturity Level', 'Due Date', 'Respondents'];
-  const rows = evts.map(e => {
-    const result = resultsByEventId[e.id];
-    return [
-      `"${e.name}"`,
-      `"${templateName(e.templateId)}"`,
-      e.status,
-      result ? String(Math.round(result.overallScore * 20)) : (e.score != null ? String(e.score) : ''),
-      result ? result.maturityLevelName : (e.maturityLevel ?? ''),
-      e.endDate ?? '',
-      String(e.respondentIds.length),
-    ];
-  });
-  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+function exportCSV(rows: ReportRow[]) {
+  const headers = [
+    'Event Name', 'Template', 'Category', 'Status',
+    'Respondents', 'Submitted', 'Validated', 'Completion %',
+    'Score', 'Maturity Level', 'Start Date', 'End Date',
+  ];
+  const csvRows = rows.map(r => [
+    `"${r.event.name}"`,
+    `"${r.template?.name ?? ''}"`,
+    `"${r.category?.name ?? ''}"`,
+    r.event.status,
+    r.respondentCount,
+    r.submittedCount,
+    r.validatedCount,
+    r.completionPct,
+    r.event.score ?? '',
+    `"${r.event.maturityLevel ?? ''}"`,
+    fmt(r.event.startDate),
+    fmt(r.event.endDate),
+  ].join(','));
+  const csv = [headers.join(','), ...csvRows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'gap2action_report.csv';
+  a.download = `gap2action-report-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Summary Card ─────────────────────────────────────────────────────────────
+
+function SummaryCard({ label, value, sub, icon: Icon, color }: {
+  label: string; value: string | number; sub?: string;
+  icon: React.ElementType; color: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="pt-5 pb-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
+            <p className="text-2xl font-bold text-foreground mt-1">{value}</p>
+            {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+          </div>
+          <div className={`rounded-xl p-2.5 ${color}`}>
+            <Icon size={18} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Sort Header ──────────────────────────────────────────────────────────────
+
+function SortHeader({ label, sortKey, current, dir, onSort }: {
+  label: string; sortKey: SortKey; current: SortKey; dir: SortDir;
+  onSort: (k: SortKey) => void;
+}) {
+  const active = current === sortKey;
+  return (
+    <th
+      className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground cursor-pointer select-none whitespace-nowrap hover:text-foreground transition-colors"
+      onClick={() => onSort(sortKey)}
+    >
+      <span className="flex items-center gap-1">
+        {label}
+        {active
+          ? dir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />
+          : <ChevronDown size={12} className="opacity-30" />
+        }
+      </span>
+    </th>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function Reports() {
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
-  const evts = allEvents();
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [rows, setRows] = useState<ReportRow[]>([]);
 
-  // KPI data
-  const totalAssessments = evts.length;
-  const completedEvents = evts.filter(e => e.status === 'Completed').length;
-  const activeEvents = evts.filter(e => e.status === 'Open' || e.status === 'In Progress').length;
-  const scoredEvents = evts.filter(e => resultsByEventId[e.id] || e.score != null);
-  const avgScore = scoredEvents.length > 0
-    ? Math.round(
-        scoredEvents.reduce((sum, e) => {
-          const r = resultsByEventId[e.id];
-          return sum + (r ? Math.round(r.overallScore * 20) : (e.score ?? 0));
-        }, 0) / scoredEvents.length
-      )
-    : null;
+  useEffect(() => {
+    const events    = getEvents();
+    const templates = getTemplates();
+    const categories = getCategories();
+    const submissions = getSubmissions();
 
-  // Filter events
-  const filteredEvts = statusFilter === 'All'
-    ? evts
-    : evts.filter(e => e.status === statusFilter);
-
-  const filterOptions: StatusFilter[] = ['All', 'Open', 'In Progress', 'Completed', 'Closed', 'Draft'];
-
-  // Category breakdown
-  const catBreakdown = categories.map(cat => {
-    const catEvts = evts.filter(e => {
-      const tpl = templates.find(t => t.id === e.templateId);
-      return tpl?.categoryId === cat.id;
+    const built: ReportRow[] = events.map(ev => {
+      const tpl = templates.find(t => t.id === ev.templateId);
+      const cat = categories.find(c => c.id === tpl?.categoryId);
+      const evSubs = submissions.filter(s => s.eventId === ev.id);
+      const respondentCount = ev.respondentProgress.length;
+      const submittedCount  = ev.respondentProgress.filter(p =>
+        p.status === 'Submitted' || p.status === 'Validated'
+      ).length;
+      const validatedCount  = ev.respondentProgress.filter(p => p.status === 'Validated').length;
+      const completionPct   = respondentCount > 0
+        ? Math.round(submittedCount / respondentCount * 100)
+        : 0;
+      return { event: ev, template: tpl, category: cat, completionPct, respondentCount, submittedCount, validatedCount };
     });
-    const catScored = catEvts.filter(e => resultsByEventId[e.id] || e.score != null);
-    const catAvg = catScored.length > 0
-      ? Math.round(
-          catScored.reduce((sum, e) => {
-            const r = resultsByEventId[e.id];
-            return sum + (r ? Math.round(r.overallScore * 20) : (e.score ?? 0));
-          }, 0) / catScored.length
-        )
-      : null;
-    return { cat, count: catEvts.length, avg: catAvg };
-  }).filter(c => c.count > 0);
+
+    setRows(built);
+
+    const handler = () => {
+      const evs2 = getEvents();
+      const subs2 = getSubmissions();
+      setRows(evs2.map(ev => {
+        const tpl = templates.find(t => t.id === ev.templateId);
+        const cat = categories.find(c => c.id === tpl?.categoryId);
+        const rc  = ev.respondentProgress.length;
+        const sc  = ev.respondentProgress.filter(p => p.status === 'Submitted' || p.status === 'Validated').length;
+        const vc  = ev.respondentProgress.filter(p => p.status === 'Validated').length;
+        return { event: ev, template: tpl, category: cat, completionPct: rc > 0 ? Math.round(sc / rc * 100) : 0, respondentCount: rc, submittedCount: sc, validatedCount: vc };
+      }));
+    };
+    window.addEventListener('g2a-store-updated', handler);
+    return () => window.removeEventListener('g2a-store-updated', handler);
+  }, []);
+
+  // Filter
+  const filtered = rows.filter(r =>
+    statusFilter === 'all' || r.event.status === statusFilter
+  );
+
+  // Sort
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+
+  const sorted = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (sortKey === 'name')       cmp = a.event.name.localeCompare(b.event.name);
+    if (sortKey === 'template')   cmp = (a.template?.name ?? '').localeCompare(b.template?.name ?? '');
+    if (sortKey === 'category')   cmp = (a.category?.name ?? '').localeCompare(b.category?.name ?? '');
+    if (sortKey === 'status')     cmp = a.event.status.localeCompare(b.event.status);
+    if (sortKey === 'completion') cmp = a.completionPct - b.completionPct;
+    if (sortKey === 'score')      cmp = (a.event.score ?? -1) - (b.event.score ?? -1);
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  // Summary stats
+  const total      = rows.length;
+  const completed  = rows.filter(r => r.event.status === 'Completed' || r.event.status === 'Closed').length;
+  const avgCompletion = rows.length > 0
+    ? Math.round(rows.reduce((s, r) => s + r.completionPct, 0) / rows.length)
+    : 0;
+  const scoredEvents = rows.filter(r => r.event.score != null);
+  const avgScore = scoredEvents.length > 0
+    ? (scoredEvents.reduce((s, r) => s + (r.event.score ?? 0), 0) / scoredEvents.length).toFixed(1)
+    : '—';
+
+  const STATUS_OPTIONS: StatusFilter[] = ['all', 'Open', 'In Progress', 'Completed', 'Closed'];
 
   return (
-    <div className="px-8 py-7 max-w-6xl mx-auto space-y-10">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Reports</h1>
-        <p className="text-sm text-muted-foreground mt-1">Cross-event analytics and exportable summaries.</p>
+    <div className="p-8 max-w-7xl mx-auto space-y-8">
+
+      {/* ── Page header ── */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Reports</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Overview of all assessment events, completion rates, and scores.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => exportCSV(sorted)}
+          disabled={sorted.length === 0}
+        >
+          <Download size={14} className="mr-2" />
+          Export CSV
+        </Button>
       </div>
 
-      {/* ── Section 1: KPI cards ── */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Overview</h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: 'Total Assessments', value: totalAssessments },
-            { label: 'Completed Events',  value: completedEvents },
-            { label: 'Active Events',     value: activeEvents },
-            { label: 'Average Score',     value: avgScore != null ? `${avgScore}%` : '—' },
-          ].map(kpi => (
-            <Card key={kpi.label}>
-              <CardHeader className="pb-1 pt-4 px-5">
-                <CardTitle className="text-xs font-medium text-muted-foreground">{kpi.label}</CardTitle>
-              </CardHeader>
-              <CardContent className="px-5 pb-4">
-                <p className="text-3xl font-bold text-foreground">{kpi.value}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </section>
+      {/* ── Summary cards ── */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <SummaryCard
+          label="Total Events"
+          value={total}
+          sub={`${completed} completed`}
+          icon={FileText}
+          color="bg-blue-50 text-blue-600"
+        />
+        <SummaryCard
+          label="Avg Completion"
+          value={`${avgCompletion}%`}
+          sub="across all events"
+          icon={Clock}
+          color="bg-amber-50 text-amber-600"
+        />
+        <SummaryCard
+          label="Avg Score"
+          value={avgScore}
+          sub={scoredEvents.length > 0 ? `from ${scoredEvents.length} scored event${scoredEvents.length > 1 ? 's' : ''}` : 'no scores yet'}
+          icon={BarChart2}
+          color="bg-emerald-50 text-emerald-600"
+        />
+        <SummaryCard
+          label="Total Respondents"
+          value={rows.reduce((s, r) => s + r.respondentCount, 0)}
+          sub={`${rows.reduce((s, r) => s + r.validatedCount, 0)} validated`}
+          icon={Users}
+          color="bg-purple-50 text-purple-600"
+        />
+      </div>
 
-      {/* ── Section 2: Events Table ── */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Events Summary</h2>
-          <Button size="sm" variant="outline" onClick={() => exportCSV(filteredEvts)}>
-            <Download size={13} className="mr-1.5" /> Export CSV
-          </Button>
-        </div>
+      {/* ── Filter bar ── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {STATUS_OPTIONS.map(s => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              statusFilter === s
+                ? 'bg-primary text-white'
+                : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+            }`}
+          >
+            {s === 'all' ? `All (${rows.length})` : `${s} (${rows.filter(r => r.event.status === s).length})`}
+          </button>
+        ))}
+      </div>
 
-        {/* Filter pills */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {filterOptions.map(f => (
-            <button
-              key={f}
-              onClick={() => setStatusFilter(f)}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                statusFilter === f
-                  ? 'bg-primary text-white'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground'
-              }`}
-            >
-              {f}
-              {f !== 'All' && (
-                <span className={`ml-1.5 text-[10px] font-bold ${statusFilter === f ? 'opacity-70' : ''}`}>
-                  {evts.filter(e => e.status === f).length}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        <div className="rounded-xl border bg-card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/30">
-                {['Event Name', 'Template', 'Status', 'Score', 'Maturity Level', 'Due Date', 'Respondents'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {filteredEvts.map(e => {
-                const result = resultsByEventId[e.id];
-                const score = result
-                  ? `${Math.round(result.overallScore * 20)}%`
-                  : e.score != null ? `${e.score}%` : '—';
-                const maturity = result
-                  ? result.maturityLevelName
-                  : e.maturityLevel ?? '—';
-                const sbadge = STATUS_BADGE[e.status];
-                return (
-                  <tr key={e.id} className="hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-3 font-medium text-foreground">{e.name}</td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs">{templateName(e.templateId)}</td>
-                    <td className="px-4 py-3">
-                      {sbadge
-                        ? <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${sbadge.cls}`}>{sbadge.label}</span>
-                        : <Badge variant="outline">{e.status}</Badge>
-                      }
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-foreground">{score}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{maturity}</td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(e.endDate)}</td>
-                    <td className="px-4 py-3 text-center text-muted-foreground">{e.respondentIds.length}</td>
-                  </tr>
-                );
-              })}
-              {filteredEvts.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                    No events match this filter.
-                  </td>
+      {/* ── Table ── */}
+      <div className="rounded-xl border bg-card overflow-hidden">
+        {sorted.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
+            <FileText size={32} className="text-muted-foreground/40" />
+            <p className="text-sm font-medium text-foreground">No events found</p>
+            <p className="text-xs text-muted-foreground">
+              {statusFilter !== 'all' ? 'Try a different filter.' : 'Create an assessment event to get started.'}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/30">
+                  <SortHeader label="Event"      sortKey="name"       current={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Template"   sortKey="template"   current={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Category"   sortKey="category"   current={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Status"     sortKey="status"     current={sortKey} dir={sortDir} onSort={handleSort} />
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Respondents</th>
+                  <SortHeader label="Completion" sortKey="completion" current={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Score"      sortKey="score"      current={sortKey} dir={sortDir} onSort={handleSort} />
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Maturity</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">End Date</th>
+                  <th className="px-4 py-3" />
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody className="divide-y">
+                {sorted.map((r, i) => (
+                  <tr key={r.event.id} className={`hover:bg-muted/20 transition-colors ${i % 2 === 0 ? '' : 'bg-muted/5'}`}>
+                    {/* Event name */}
+                    <td className="px-4 py-3.5">
+                      <p className="font-medium text-foreground">{r.event.name}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{r.event.description ?? ''}</p>
+                    </td>
+                    {/* Template */}
+                    <td className="px-4 py-3.5 text-muted-foreground text-xs">
+                      {r.template ? (
+                        <span>{r.template.name}<span className="ml-1 text-muted-foreground/60">v{r.template.version}</span></span>
+                      ) : '—'}
+                    </td>
+                    {/* Category */}
+                    <td className="px-4 py-3.5 text-xs text-muted-foreground">{r.category?.name ?? '—'}</td>
+                    {/* Status */}
+                    <td className="px-4 py-3.5">
+                      <Badge variant={STATUS_VARIANT[r.event.status] ?? 'outline'} className="text-[11px]">
+                        {r.event.status}
+                      </Badge>
+                    </td>
+                    {/* Respondents */}
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Users size={12} />
+                        <span>{r.submittedCount}/{r.respondentCount}</span>
+                        {r.validatedCount > 0 && (
+                          <span className="text-emerald-600 flex items-center gap-0.5">
+                            <CheckCircle2 size={11} /> {r.validatedCount}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    {/* Completion */}
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <Progress value={r.completionPct} className="h-1.5 w-20" />
+                        <span className="text-xs text-muted-foreground w-8">{r.completionPct}%</span>
+                      </div>
+                    </td>
+                    {/* Score */}
+                    <td className="px-4 py-3.5">
+                      {r.event.score != null ? (
+                        <span className="text-sm font-semibold text-foreground">{r.event.score.toFixed(1)}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    {/* Maturity */}
+                    <td className="px-4 py-3.5">
+                      {r.event.maturityLevel ? (
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${MATURITY_COLOR[r.event.maturityLevel] ?? 'text-muted-foreground bg-muted border-border'}`}>
+                          {r.event.maturityLevel}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    {/* End date */}
+                    <td className="px-4 py-3.5 text-xs text-muted-foreground">{fmt(r.event.endDate)}</td>
+                    {/* Action */}
+                    <td className="px-4 py-3.5">
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" asChild>
+                        <Link to={`/events/${r.event.id}`}>
+                          View <ArrowRight size={12} className="ml-1" />
+                        </Link>
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
-      {/* ── Section 3: Category Breakdown ── */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Category Breakdown</h2>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {catBreakdown.map(({ cat, count, avg }) => (
-            <Card key={cat.id}>
-              <CardHeader className="pb-2 pt-4 px-5">
-                <CardTitle className="text-sm font-semibold text-foreground">{cat.name}</CardTitle>
-              </CardHeader>
-              <CardContent className="px-5 pb-4 space-y-1">
-                <p className="text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground text-lg">{count}</span> event{count !== 1 ? 's' : ''}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Avg score:{' '}
-                  <span className="font-semibold text-foreground">{avg != null ? `${avg}%` : '—'}</span>
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </section>
+      <p className="text-[11px] text-muted-foreground text-right">
+        Showing {sorted.length} of {rows.length} event{rows.length !== 1 ? 's' : ''}
+      </p>
     </div>
   );
 }
