@@ -7,7 +7,7 @@ export type RecommendationStatus = 'Draft' | 'Approved' | 'Converted' | 'Rejecte
 export type TaskStatus = 'Not Started' | 'In Progress' | 'Done' | 'Blocked';
 export type Priority = 'High' | 'Medium' | 'Low';
 export type MaturityLevel = 'Initial' | 'Managed' | 'Defined' | 'Quantitatively Managed' | 'Optimizing';
-export type RespondentStatus = 'Not Started' | 'In Progress' | 'Submitted' | 'Validated' | 'Returned';
+export type RespondentStatus = 'Not Started' | 'In Progress' | 'Submitted' | 'Validated' | 'Returned' | 'Returned for Revision';
 
 export interface User {
   id: string;
@@ -55,6 +55,11 @@ export interface Template {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  parentVersionId?: string;
+  coverImageUrl?: string;
+  tagline?: string;
+  definition?: string;
+  explanation?: string;
 }
 
 export interface RespondentProgress {
@@ -63,6 +68,7 @@ export interface RespondentProgress {
   status: RespondentStatus;
   lastActivity?: string;
   feedback?: string;
+  returnCount?: number;
 }
 
 export interface AssessmentEvent {
@@ -77,6 +83,7 @@ export interface AssessmentEvent {
   targetMaturityLevel?: MaturityLevel;
   reassessmentDate?: string;
   respondentIds: string[];
+  sectionAssignments?: SectionAssignment[]; // undefined = all respondents answer all sections
   respondentProgress: RespondentProgress[];
   completionRate: number;
   score?: number;
@@ -107,6 +114,11 @@ export interface Task {
   dependsOn: string[];
   sourceRecommendationId: string | null;
   completionPct: number;
+}
+
+export interface SectionAssignment {
+  sectionId: string;       // matches BuilderSection.id from the template
+  respondentIds: string[]; // resolved user IDs (not group/dept refs)
 }
 
 // ─── Template Builder ─────────────────────────────────────────────────────────
@@ -154,7 +166,9 @@ export interface QuestionnaireSubmission {
 }
 
 export interface RespondentAction {
-  status: 'Validated' | 'Returned';
+  status: 'Validated' | 'Returned for Revision';
   feedback?: string;
+  returnedAt?: string;
+  returnCount: number;
   actionAt: string;
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useDirtyState } from '@/context/DirtyStateContext';
 import {
@@ -12,7 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useAuth } from '@/context/AuthContext';
-import { categories, templates } from '@/services/mockData';
+import { categories } from '@/services/mockData';
+import { getTemplates } from '@/services/store';
 
 const categoryIcons: Record<string, React.ElementType> = {
   'building-2': Building2,
@@ -130,6 +131,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { user, logout } = useAuth();
   const { requestNavigation } = useDirtyState();
   const [expandedCats, setExpandedCats] = useState<string[]>(['cat1']);
+  const [templates, setTemplates] = useState(() => getTemplates());
+
+  // Re-read templates whenever anything writes to the store
+  useEffect(() => {
+    const handler = () => setTemplates(getTemplates());
+    window.addEventListener('g2a-store-updated', handler);
+    return () => window.removeEventListener('g2a-store-updated', handler);
+  }, []);
 
   const handleLogout = () => { logout(); navigate('/login', { replace: true }); };
   const toggleCat = (id: string) =>
@@ -199,7 +208,35 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <SectionLabel label="Assessment Categories" collapsed={collapsed} />
 
               {categories.map(cat => {
-                const catTemplates = templates.filter(t => t.categoryId === cat.id);
+                // Build sidebar entries: one per family showing Active + any Draft versions (no Archived)
+                const allCatTemplates = templates.filter(t => t.categoryId === cat.id);
+                const catTemplateIds = new Set(allCatTemplates.map(t => t.id));
+                const roots = allCatTemplates.filter(
+                  t => !t.parentVersionId || !catTemplateIds.has(t.parentVersionId)
+                );
+                const parseVer = (v: string) => { const [maj=0, min=0] = v.split('.').map(Number); return maj * 1000 + min; };
+
+                // For each family: pick ONE representative — Active if available, else highest Draft
+                interface SidebarEntry { tpl: typeof allCatTemplates[number] }
+                const catTemplates: SidebarEntry[] = roots.flatMap(root => {
+                  const family: typeof allCatTemplates = [];
+                  const queue = [root.id];
+                  const visited = new Set<string>();
+                  while (queue.length > 0) {
+                    const pid = queue.shift()!;
+                    if (visited.has(pid)) continue;
+                    visited.add(pid);
+                    const t = allCatTemplates.find(x => x.id === pid);
+                    if (t) {
+                      family.push(t);
+                      allCatTemplates.filter(x => x.parentVersionId === pid).forEach(c => queue.push(c.id));
+                    }
+                  }
+                  const primary =
+                    family.find(t => t.status === 'Active') ??
+                    family.filter(t => t.status !== 'Archived').sort((a, b) => parseVer(b.version) - parseVer(a.version))[0];
+                  return primary ? [{ tpl: primary }] : [];
+                });
                 const Icon = categoryIcons[cat.icon] ?? FolderOpen;
                 const isExpanded = expandedCats.includes(cat.id);
 
@@ -248,7 +285,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     </div>
                     <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
                       <div className="pl-[52px] pr-2 pb-1 space-y-0.5">
-                        {catTemplates.map(tpl => (
+                        {catTemplates.map(({ tpl }) => (
                           <NavLink
                             key={tpl.id}
                             to={`/templates/${tpl.id}/builder`}
@@ -264,9 +301,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                           >
                             <LayoutTemplate size={11} className="shrink-0 text-sidebar-accent opacity-75" />
                             <span className="truncate flex-1">{tpl.name}</span>
-                            <span className="shrink-0 text-[8px] font-bold uppercase tracking-wide text-sidebar-accent/60 bg-sidebar-accent/10 rounded px-1 py-0.5">
-                              TPL
-                            </span>
+                            <span className="shrink-0 text-[8px] font-bold text-sidebar-accent/70 bg-sidebar-accent/10 rounded px-1 py-0.5">v{tpl.version}</span>
                           </NavLink>
                         ))}
                       </div>

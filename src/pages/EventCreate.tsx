@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
-import { ArrowLeft, Users, Search, X, Check, Send, UserCheck } from 'lucide-react';
+import { ArrowLeft, Users, Search, X, Check, Send, UserCheck, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,10 +15,10 @@ import {
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
 import {
-  users, templates, departments, userGroups,
+  users, departments, userGroups,
 } from '@/services/mockData';
-import { saveEvent } from '@/services/store';
-import type { AssessmentEvent, MaturityLevel, EventStatus } from '@/types';
+import { saveEvent, getTemplates, getTemplateSections } from '@/services/store';
+import type { AssessmentEvent, MaturityLevel, EventStatus, BuilderSection } from '@/types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -26,7 +26,6 @@ const MATURITY_LEVELS: MaturityLevel[] = [
   'Initial', 'Managed', 'Defined', 'Quantitatively Managed', 'Optimizing',
 ];
 
-const activeTemplates = templates.filter(t => t.status === 'Active');
 const activeUsers = users.filter(u => u.status === 'Active');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -100,6 +99,37 @@ export function EventCreate() {
 
   const { toast } = useToast();
 
+  // Section assignment (Step 3)
+  const [useSectionAssignment, setUseSectionAssignment] = useState(false);
+  const [sectionAssignments, setSectionAssignments] = useState<Record<string, Set<string>>>({});
+
+  // Active templates for picker — deduplicated by family (highest version per root)
+  const activeTemplatesForPicker = useMemo(() => {
+    const allActive = getTemplates().filter(t => t.status === 'Active');
+    allActive.sort((a, b) => {
+      const [aMaj = 0, aMin = 0] = a.version.split('.').map(Number);
+      const [bMaj = 0, bMin = 0] = b.version.split('.').map(Number);
+      return aMaj !== bMaj ? bMaj - aMaj : bMin - aMin;
+    });
+    const seen = new Set<string>();
+    return allActive.filter(t => {
+      const root = t.parentVersionId ?? t.id;
+      if (seen.has(root)) return false;
+      seen.add(root);
+      return true;
+    });
+  }, []);
+
+  // Template sections — loaded from store whenever templateId changes
+  const templateSections = useMemo<BuilderSection[]>(() => {
+    if (!form.templateId) return [];
+    return getTemplateSections(form.templateId) ?? [];
+  }, [form.templateId]);
+
+  // Section validation — every section needs >= 1 assigned respondent (only when toggle ON)
+  const sectionValidationError = useSectionAssignment &&
+    templateSections.some(s => (sectionAssignments[s.id]?.size ?? 0) === 0);
+
   // Dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [launched, setLaunched] = useState(false);
@@ -107,6 +137,11 @@ export function EventCreate() {
   const set = <K extends keyof EventForm>(k: K, v: EventForm[K]) => {
     setForm(f => ({ ...f, [k]: v }));
     setErrors(e => ({ ...e, [k]: undefined }));
+    // Reset section assignment when template changes
+    if (k === 'templateId') {
+      setUseSectionAssignment(false);
+      setSectionAssignments({});
+    }
   };
 
   // Resolve unique respondent IDs — direct + group + dept members, minus exclusions
@@ -165,6 +200,34 @@ export function EventCreate() {
     }
   };
 
+  // ── Section assignment helpers ──────────────────────────────────────────────
+
+  const handleToggleSectionAssignment = () => {
+    if (!useSectionAssignment) {
+      // Turning ON — pre-assign all resolved respondents to every section
+      const init: Record<string, Set<string>> = {};
+      templateSections.forEach(s => { init[s.id] = new Set(resolvedIds); });
+      setSectionAssignments(init);
+    }
+    setUseSectionAssignment(v => !v);
+  };
+
+  const toggleSectionUser = (sectionId: string, userId: string) => {
+    setSectionAssignments(prev => {
+      const current = new Set(prev[sectionId] ?? []);
+      if (current.has(userId)) current.delete(userId); else current.add(userId);
+      return { ...prev, [sectionId]: current };
+    });
+  };
+
+  const setAllForSection = (sectionId: string) => {
+    setSectionAssignments(prev => ({ ...prev, [sectionId]: new Set(resolvedIds) }));
+  };
+
+  const clearSection = (sectionId: string) => {
+    setSectionAssignments(prev => ({ ...prev, [sectionId]: new Set<string>() }));
+  };
+
   const removeResolved = (uid: string) => {
     if (directIds.has(uid)) {
       setDirectIds(prev => { const s = new Set(prev); s.delete(uid); return s; });
@@ -182,7 +245,10 @@ export function EventCreate() {
     if (!form.endDate) errs.endDate = 'End date is required.';
     else if (form.endDate <= form.startDate) errs.endDate = 'End date must be after start date.';
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    if (Object.keys(errs).length > 0) return false;
+    // Section assignment: every section must have at least 1 respondent (errors shown inline)
+    if (sectionValidationError) return false;
+    return true;
   };
 
   const handleSaveDraft = () => {
@@ -199,6 +265,12 @@ export function EventCreate() {
       targetMaturityLevel: form.targetMaturityLevel || undefined,
       reassessmentDate: form.reassessmentDate || undefined,
       respondentIds: resolvedIds,
+      sectionAssignments: useSectionAssignment && templateSections.length > 0
+        ? templateSections.map(s => ({
+            sectionId: s.id,
+            respondentIds: Array.from(sectionAssignments[s.id] ?? []),
+          }))
+        : undefined,
       respondentProgress: resolvedIds.map(uid => ({
         userId: uid,
         completionPct: 0,
@@ -218,7 +290,7 @@ export function EventCreate() {
 
   const handleConfirmLaunch = () => {
     const newId = `e_${Date.now()}`;
-    const tpl = templates.find(t => t.id === form.templateId);
+    const tpl = activeTemplatesForPicker.find(t => t.id === form.templateId);
     const newEvent: AssessmentEvent = {
       id: newId,
       templateId: form.templateId,
@@ -231,6 +303,12 @@ export function EventCreate() {
       targetMaturityLevel: form.targetMaturityLevel || undefined,
       reassessmentDate: form.reassessmentDate || undefined,
       respondentIds: resolvedIds,
+      sectionAssignments: useSectionAssignment && templateSections.length > 0
+        ? templateSections.map(s => ({
+            sectionId: s.id,
+            respondentIds: Array.from(sectionAssignments[s.id] ?? []),
+          }))
+        : undefined,
       respondentProgress: resolvedIds.map(uid => ({
         userId: uid,
         completionPct: 0,
@@ -248,7 +326,7 @@ export function EventCreate() {
     }, 1200);
   };
 
-  const selectedTemplate = templates.find(t => t.id === form.templateId);
+  const selectedTemplate = activeTemplatesForPicker.find(t => t.id === form.templateId);
 
   return (
     <div className="min-h-full bg-background">
@@ -309,8 +387,8 @@ export function EventCreate() {
                   onChange={e => set('templateId', e.target.value)}
                 >
                   <option value="">— Select a template —</option>
-                  {activeTemplates.map(t => (
-                    <option key={t.id} value={t.id}>{t.name} (v{t.version})</option>
+                  {activeTemplatesForPicker.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}  (v{t.version})</option>
                   ))}
                 </Select>
                 {errors.templateId && <p className="text-xs text-destructive">{errors.templateId}</p>}
@@ -383,7 +461,7 @@ export function EventCreate() {
               <Button variant="outline" onClick={handleSaveDraft}>
                 Save as Draft
               </Button>
-              <Button onClick={handleLaunch}>
+              <Button onClick={handleLaunch} disabled={sectionValidationError}>
                 <Send size={14} className="mr-2" /> Launch Event
               </Button>
             </div>
@@ -515,6 +593,130 @@ export function EventCreate() {
             )}
           </div>
         </div>
+
+        {/* ── Step 3: Section Assignment ── */}
+        {form.templateId && (
+          <div className="mt-8 rounded-xl border bg-card p-6 space-y-5">
+            {/* Toggle header */}
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Section Assignment</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {useSectionAssignment
+                    ? 'Each section can have a different subset of respondents.'
+                    : 'All respondents will answer all sections.'}
+                </p>
+              </div>
+              <label className="flex items-center gap-2.5 cursor-pointer select-none shrink-0">
+                <span className="text-xs text-muted-foreground">Assign respondents to specific sections</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={useSectionAssignment}
+                  onClick={handleToggleSectionAssignment}
+                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                    useSectionAssignment ? 'bg-primary' : 'bg-input'
+                  }`}
+                >
+                  <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                    useSectionAssignment ? 'translate-x-4' : 'translate-x-0'
+                  }`} />
+                </button>
+              </label>
+            </div>
+
+            {/* Per-section assignment panel */}
+            {useSectionAssignment && (
+              templateSections.length === 0
+                ? (
+                  <p className="text-xs text-muted-foreground italic">
+                    No sections found for this template. Save at least one section in the builder first.
+                  </p>
+                )
+                : (
+                  <div className="space-y-4">
+                    {templateSections.map(section => {
+                      const assigned = sectionAssignments[section.id] ?? new Set<string>();
+                      const hasError = assigned.size === 0;
+                      return (
+                        <div
+                          key={section.id}
+                          className={`rounded-lg border p-4 space-y-3 transition-colors ${
+                            hasError ? 'border-destructive/50 bg-destructive/5' : 'border-border'
+                          }`}
+                        >
+                          {/* Section header */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-foreground">{section.name}</p>
+                              {section.description && (
+                                <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
+                                  {section.description}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setAllForSection(section.id)}
+                                className="text-[10px] text-primary hover:underline"
+                              >
+                                Select All
+                              </button>
+                              <span className="text-muted-foreground/40 text-[10px]">·</span>
+                              <button
+                                type="button"
+                                onClick={() => clearSection(section.id)}
+                                className="text-[10px] text-muted-foreground hover:text-foreground hover:underline"
+                              >
+                                Clear All
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Respondent chips */}
+                          {resolvedUsers.length === 0 ? (
+                            <p className="text-[10px] text-muted-foreground italic">
+                              No respondents selected — add respondents in Step 2 first.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {resolvedUsers.map(u => {
+                                const isAssigned = assigned.has(u.id);
+                                return (
+                                  <button
+                                    key={u.id}
+                                    type="button"
+                                    onClick={() => toggleSectionUser(section.id, u.id)}
+                                    className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors ${
+                                      isAssigned
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                                        : 'bg-muted text-muted-foreground border-input hover:bg-muted/70'
+                                    }`}
+                                  >
+                                    <span className="font-mono">{u.initials}</span>
+                                    <span>{u.name.split(' ')[0]}</span>
+                                    {isAssigned && <Check size={10} className="text-emerald-700" strokeWidth={2.5} />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Per-section error */}
+                          {hasError && (
+                            <p className="flex items-center gap-1 text-[10px] font-medium text-destructive">
+                              <AlertCircle size={10} /> At least 1 respondent required
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Launch Confirmation Dialog ── */}

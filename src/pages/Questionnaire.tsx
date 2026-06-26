@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext';
 import {
   ChevronDown, ChevronRight, ChevronLeft, X, Paperclip,
-  CheckCircle2, Check, LogOut, Save, Send, Home, Eye,
+  CheckCircle2, Check, LogOut, Save, Send, Home, Eye, AlertTriangle, LayoutTemplate,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +14,7 @@ import {
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
 import { events as seedEvents, currentUser } from '@/services/mockData';
-import { getEvents, getTemplateSections, getSubmission, saveSubmission, updateEvent } from '@/services/store';
+import { getEvents, getTemplateSections, getSubmission, saveSubmission, updateEvent, getUserAssignedSections, getReturnFeedback, saveRespondentAction, getRespondentAction, getTemplate } from '@/services/store';
 import { cn } from '@/lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -615,18 +615,22 @@ function QuestionBlock({
 
 // ─── Success Screen ───────────────────────────────────────────────────────────
 
-function SuccessScreen({ eventName, onHome }: { eventName: string; onHome: () => void }) {
+function SuccessScreen({ eventName, onHome, revisionMode }: { eventName: string; onHome: () => void; revisionMode?: boolean }) {
   return (
     <div className="flex flex-col h-screen items-center justify-center bg-background px-6 text-center">
       <div className="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 mb-6">
         <CheckCircle2 size={40} className="text-emerald-600" />
       </div>
-      <h1 className="text-2xl font-bold text-foreground mb-3">Assessment Submitted!</h1>
+      <h1 className="text-2xl font-bold text-foreground mb-3">
+        {revisionMode ? 'Revised Submission Sent!' : 'Assessment Submitted!'}
+      </h1>
       <p className="text-base text-muted-foreground max-w-md leading-relaxed mb-2">
         Thank you for completing <strong>{eventName}</strong>.
       </p>
       <p className="text-sm text-muted-foreground max-w-md leading-relaxed mb-8">
-        The assessor will review and validate your submission. You will be notified once the assessment is closed.
+        {revisionMode
+          ? 'Your revised submission has been sent to the assessor for review.'
+          : 'The assessor will review and validate your submission. You will be notified once the assessment is closed.'}
       </p>
       <Button onClick={onHome}>
         <Home size={15} className="mr-2" /> Return to Dashboard
@@ -677,7 +681,21 @@ export function Questionnaire() {
   const event = id ? allEventsMap.get(id) : undefined;
 
   const sections = buildSections(id);
+  const allSectionIds = sections.map(s => s.id);
+  const assignedIds = event
+    ? getUserAssignedSections(event, userId, allSectionIds)
+    : allSectionIds;
+  const visibleSections = sections.filter(s => assignedIds.includes(s.id));
+
+  // Template cover data
+  const cover = event ? getTemplate(event.templateId) : undefined;
+  const hasCover = !!(cover?.tagline || cover?.definition || cover?.coverImageUrl || cover?.explanation);
+
   const storageKey = `g2a-questionnaire-${id}`;
+
+  // Revision mode — when assessor has returned this submission for revision
+  const returnFeedback = !isPreview ? getReturnFeedback(id ?? '', userId) : null;
+  const isRevisionMode = returnFeedback !== null;
 
   // ── State ──
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>(() => {
@@ -689,7 +707,7 @@ export function Questionnaire() {
     } catch { return {}; }
   });
   const [evidence, setEvidence] = useState<Record<string, EvidenceFile[]>>({});
-  const [currentIdx, setCurrentIdx] = useState(0);
+  const [currentIdx, setCurrentIdx] = useState(() => hasCover ? -1 : 0);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(() => {
     const saved = getSubmission(id ?? '', userId);
@@ -698,6 +716,7 @@ export function Questionnaire() {
   const [, forceTimeUpdate] = useState(0);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [revisionSubmitted, setRevisionSubmitted] = useState(false);
 
   // Keep answers ref current for the auto-save interval (avoids stale closure)
   const answersRef = useRef(answers);
@@ -708,8 +727,8 @@ export function Questionnaire() {
     const interval = setInterval(() => {
       setSaving(true);
       const current = answersRef.current;
-      const answered = sections.flatMap(s => s.questions).filter(q => isAnswered(q, current)).length;
-      const total = sections.flatMap(s => s.questions.filter(q => q.required)).length;
+      const answered = visibleSections.flatMap(s => s.questions).filter(q => isAnswered(q, current)).length;
+      const total = visibleSections.flatMap(s => s.questions.filter(q => q.required)).length;
       const pct = total > 0 ? Math.round((answered / total) * 100) : 0;
       localStorage.setItem(storageKey, JSON.stringify(current));
       if (id) {
@@ -728,7 +747,7 @@ export function Questionnaire() {
       setTimeout(() => { setSaving(false); setLastSaved(new Date()); }, 600);
     }, 30000);
     return () => clearInterval(interval);
-  }, [storageKey, id, sections]);
+  }, [storageKey, id, visibleSections]);
 
   // ── Refresh "X minutes ago" text every 60s ──
   useEffect(() => {
@@ -755,8 +774,8 @@ export function Questionnaire() {
 
   const manualSave = () => {
     setSaving(true);
-    const answered = sections.flatMap(s => s.questions).filter(q => isAnswered(q, answers)).length;
-    const total = sections.flatMap(s => s.questions.filter(q => q.required)).length;
+    const answered = visibleSections.flatMap(s => s.questions).filter(q => isAnswered(q, answers)).length;
+    const total = visibleSections.flatMap(s => s.questions.filter(q => q.required)).length;
     const pct = total > 0 ? Math.round((answered / total) * 100) : 0;
     localStorage.setItem(storageKey, JSON.stringify(answers));
     if (id) {
@@ -789,6 +808,16 @@ export function Questionnaire() {
             : p
         ) ?? [],
       });
+      // In revision mode: clear the return action so the assessor sees a fresh submission
+      if (isRevisionMode) {
+        const existingAction = getRespondentAction(id, userId);
+        saveRespondentAction(id, userId, {
+          status: 'Validated',
+          returnCount: existingAction?.returnCount ?? 0,
+          actionAt: now,
+        });
+        setRevisionSubmitted(true);
+      }
     }
     localStorage.removeItem(storageKey);
     setSubmitted(true);
@@ -796,10 +825,10 @@ export function Questionnaire() {
   };
 
   // ── Derived ──
-  const currentSection = sections[currentIdx];
-  const sectionComplete = currentSection.questions.every(q => isAnswered(q, answers));
-  const allComplete = sections.every(s => s.questions.every(q => isAnswered(q, answers)));
-  const isLast = currentIdx === sections.length - 1;
+  const currentSection = currentIdx >= 0 ? visibleSections[currentIdx] : undefined;
+  const sectionComplete = currentSection ? currentSection.questions.every(q => isAnswered(q, answers)) : false;
+  const allComplete = visibleSections.every(s => s.questions.every(q => isAnswered(q, answers)));
+  const isLast = currentIdx === visibleSections.length - 1;
   const isFirst = currentIdx === 0;
   const eventName = event?.name ?? 'Assessment';
   const dueDate = event?.endDate
@@ -808,7 +837,7 @@ export function Questionnaire() {
 
   // ── Success screen ──
   if (submitted) {
-    return <SuccessScreen eventName={eventName} onHome={() => navigate('/')} />;
+    return <SuccessScreen eventName={eventName} onHome={() => navigate('/')} revisionMode={revisionSubmitted} />;
   }
 
   return (
@@ -885,21 +914,38 @@ export function Questionnaire() {
                     className="h-full bg-primary rounded-full transition-all duration-500"
                     style={{
                       width: `${Math.round(
-                        sections.reduce((n, s) => n + s.questions.filter(q => isAnswered(q, answers)).length, 0) /
-                        sections.reduce((n, s) => n + s.questions.filter(q => q.required).length, 0) * 100
+                        visibleSections.reduce((n, s) => n + s.questions.filter(q => isAnswered(q, answers)).length, 0) /
+                        Math.max(1, visibleSections.reduce((n, s) => n + s.questions.filter(q => q.required).length, 0)) * 100
                       )}%`,
                     }}
                   />
                 </div>
                 <span className="text-[10px] text-muted-foreground shrink-0">
-                  {sections.reduce((n, s) => n + s.questions.filter(q => isAnswered(q, answers)).length, 0)}/
-                  {sections.reduce((n, s) => n + s.questions.filter(q => q.required).length, 0)}
+                  {visibleSections.reduce((n, s) => n + s.questions.filter(q => isAnswered(q, answers)).length, 0)}/
+                  {visibleSections.reduce((n, s) => n + s.questions.filter(q => q.required).length, 0)}
                 </span>
               </div>
             </div>
 
             <nav className="flex-1 p-2 space-y-1">
-              {sections.map((section, idx) => {
+              {hasCover && (
+                <button
+                  onClick={() => setCurrentIdx(-1)}
+                  className={cn(
+                    'w-full flex items-start gap-2.5 rounded-lg px-3 py-3 text-left transition-colors',
+                    currentIdx === -1
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-foreground hover:bg-muted/60',
+                  )}
+                >
+                  <LayoutTemplate size={18} className="shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold">Introduction</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Template overview</p>
+                  </div>
+                </button>
+              )}
+              {visibleSections.map((section, idx) => {
                 const status = sectionStatus(section, answers);
                 const active = idx === currentIdx;
                 return (
@@ -942,27 +988,99 @@ export function Questionnaire() {
 
           {/* ── Main content ── */}
           <main ref={mainRef} className="flex-1 overflow-y-auto">
-            <div className="max-w-2xl mx-auto px-8 py-8">
+
+            {/* ── Cover / intro screen ── */}
+            {currentIdx === -1 && cover && (
+              <div className="max-w-2xl mx-auto px-8 py-12 flex flex-col items-center text-center">
+                {cover.coverImageUrl && (
+                  <img
+                    src={cover.coverImageUrl}
+                    alt={cover.name}
+                    className="w-full max-h-52 object-cover rounded-2xl mb-8 shadow-md"
+                  />
+                )}
+                <h1
+                  className="text-4xl font-semibold text-foreground mb-3"
+                  style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+                >
+                  {cover.name}
+                </h1>
+                {cover.tagline && (
+                  <p className="text-lg italic text-muted-foreground mb-6">{cover.tagline}</p>
+                )}
+                {cover.definition && (
+                  <p className="text-sm text-foreground leading-relaxed mb-4 max-w-xl">{cover.definition}</p>
+                )}
+                {cover.explanation && (
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-8 max-w-xl">{cover.explanation}</p>
+                )}
+                {visibleSections.length > 0 && (
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground mb-8">
+                    <span>{visibleSections.length} section{visibleSections.length !== 1 ? 's' : ''}</span>
+                    <span>·</span>
+                    <span>{visibleSections.reduce((n, s) => n + s.questions.length, 0)} questions</span>
+                    <span>·</span>
+                    <span>~{Math.ceil(visibleSections.reduce((n, s) => n + s.questions.length, 0) * 1.5)} min</span>
+                  </div>
+                )}
+                <Button size="lg" onClick={() => setCurrentIdx(0)}>
+                  Begin Assessment →
+                </Button>
+              </div>
+            )}
+
+            <div className="max-w-2xl mx-auto px-8 py-8" style={{ display: currentIdx === -1 ? 'none' : undefined }}>
+
+              {/* Revision mode banner */}
+              {isRevisionMode && returnFeedback && (
+                <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-amber-800">Your submission was returned for revision</p>
+                      <p className="text-xs font-medium text-amber-700 mt-2">Assessor feedback:</p>
+                      <p className="text-sm text-amber-900 mt-0.5 leading-relaxed">"{returnFeedback}"</p>
+                      <p className="text-xs text-amber-700 mt-3">
+                        All your previous answers are pre-loaded. Review the feedback, update your answers, and resubmit.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Partial-assignment banner */}
+              {visibleSections.length < sections.length && (
+                <div className="mb-6 flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800">
+                  <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
+                  </svg>
+                  <span>
+                    You are responding to <strong>{visibleSections.length}</strong> of <strong>{sections.length}</strong> sections assigned to your role in this assessment.
+                  </span>
+                </div>
+              )}
 
               {/* Section header */}
+              {currentSection && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                  <span className="font-medium">Section {currentIdx + 1} of {sections.length}</span>
+                  <span className="font-medium">Section {currentIdx + 1} of {visibleSections.length}</span>
                   <span>·</span>
                   <span>{currentSection.questions.filter(q => isAnswered(q, answers)).length} of {currentSection.questions.filter(q => q.required).length} answered</span>
                 </div>
                 <h1 className="text-xl font-bold text-foreground">{currentSection.name}</h1>
                 <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{currentSection.description}</p>
               </div>
+              )}
 
               {/* Questions */}
               <div className="space-y-6">
-                {currentSection.questions.map((q, idx) => (
+                {(currentSection?.questions ?? []).map((q, idx) => (
                   <QuestionBlock
                     key={q.id}
                     question={q}
                     index={idx}
-                    total={currentSection.questions.length}
+                    total={currentSection?.questions.length ?? 0}
                     answers={answers}
                     evidence={evidence}
                     onAnswer={handleAnswer}
@@ -1000,7 +1118,7 @@ export function Questionnaire() {
                             onClick={() => setSubmitOpen(true)}
                             className={cn('gap-2', !allComplete && 'pointer-events-none')}
                           >
-                            <Send size={14} /> Submit Assessment
+                            <Send size={14} /> {isRevisionMode ? 'Resubmit Assessment' : 'Submit Assessment'}
                           </Button>
                         </span>
                       </TooltipTrigger>
@@ -1039,7 +1157,7 @@ export function Questionnaire() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base font-semibold">
               <Send size={16} className="text-primary" />
-              Submit Assessment?
+              {isRevisionMode ? 'Resubmit Assessment?' : 'Submit Assessment?'}
             </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-3 mt-2">
@@ -1049,7 +1167,7 @@ export function Questionnaire() {
                 <div className="rounded-lg bg-muted/50 border px-4 py-3 space-y-1 text-sm">
                   <p className="font-medium text-foreground">{eventName}</p>
                   <p className="text-muted-foreground text-xs">
-                    {sections.length} sections · {sections.reduce((n, s) => n + s.questions.length, 0)} questions
+                    {visibleSections.length} sections · {visibleSections.reduce((n, s) => n + s.questions.length, 0)} questions
                   </p>
                 </div>
                 <p className="text-sm text-muted-foreground">Are you sure you want to submit?</p>
@@ -1061,7 +1179,7 @@ export function Questionnaire() {
               <Button variant="outline" size="sm">Cancel</Button>
             </DialogClose>
             <Button size="sm" onClick={handleConfirmSubmit}>
-              <Send size={13} className="mr-1.5" /> Submit Assessment
+              <Send size={13} className="mr-1.5" /> {isRevisionMode ? 'Resubmit' : 'Submit Assessment'}
             </Button>
           </DialogFooter>
         </DialogContent>

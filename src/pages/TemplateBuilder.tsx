@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useDirtyState, registerDirtyGuard, unregisterDirtyGuard } from '@/context/DirtyStateContext';
 import {
   DndContext, DragOverlay, closestCenter,
@@ -13,7 +13,8 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   ChevronRight, ChevronDown, Plus, Trash2, GripVertical,
-  Save, Zap, ArrowLeft, BarChart2, Info, X, Check, Lock, Eye,
+  Save, Zap, ArrowLeft, BarChart2, Info, X, Check, Lock, Eye, GitBranch,
+  Upload, Download, AlertCircle, AlertTriangle, Camera, ImageIcon, LayoutTemplate,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,9 +28,10 @@ import {
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
 import { templates as seedTemplates } from '@/services/mockData';
-import { getTemplateSections, saveTemplateSections, updateEvent, getTemplateMeta, saveTemplateMeta } from '@/services/store';
+import { getTemplateSections, saveTemplateSections, updateEvent, getTemplateMeta, saveTemplateMeta, cloneTemplate, getTemplates, getVersionFamily, saveTemplate, getTemplate, updateTemplate } from '@/services/store';
 import { useAuth } from '@/context/AuthContext';
-import type { TemplateStatus, QuestionType, AnswerOption, BuilderQuestion, BuilderSection } from '@/types';
+import type { TemplateStatus, QuestionType, AnswerOption, BuilderQuestion, BuilderSection, Template } from '@/types';
+import { parseTemplateCSV, exportSectionsToCSV, generateCsvTemplate, type CsvImportResult } from '@/utils/csvImport';
 
 interface MaturityRow {
   id: string;
@@ -42,6 +44,7 @@ interface MaturityRow {
 
 type Selection =
   | { kind: 'scoring' }
+  | { kind: 'cover' }
   | { kind: 'section'; sectionId: string }
   | { kind: 'question'; sectionId: string; questionId: string };
 
@@ -158,7 +161,7 @@ function SortableSectionRow({
   return (
     <div ref={setNodeRef} style={style}>
       <div
-        className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 cursor-pointer transition-colors select-none ${
+        className={`group/row flex items-center gap-1 rounded-lg px-2 py-1.5 cursor-pointer transition-colors select-none ${
           selected ? 'bg-primary/12 text-primary' : 'hover:bg-muted/60 text-foreground'
         }`}
         onClick={onSelect}
@@ -184,7 +187,7 @@ function SortableSectionRow({
         <span className="shrink-0 text-[10px] text-muted-foreground">{section.questions.length}q</span>
         {!locked && (
           <button
-            className="shrink-0 opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive p-0.5 transition-opacity"
+            className="shrink-0 opacity-0 group-hover/row:opacity-100 text-destructive hover:text-destructive p-0.5 transition-opacity"
             onClick={e => { e.stopPropagation(); onDelete(); }}
           >
             <Trash2 size={12} />
@@ -235,7 +238,7 @@ function SortableQuestionRow({ question, selected, locked, onSelect, onDelete }:
   return (
     <div
       ref={setNodeRef} style={style}
-      className={`group flex items-center gap-1 rounded-md px-2 py-1.5 cursor-pointer transition-colors select-none ${
+      className={`group/row flex items-center gap-1 rounded-md px-2 py-1.5 cursor-pointer transition-colors select-none ${
         selected ? 'bg-primary/10 text-primary' : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
       }`}
       onClick={onSelect}
@@ -255,7 +258,7 @@ function SortableQuestionRow({ question, selected, locked, onSelect, onDelete }:
       <span className="shrink-0 text-[9px] opacity-60 font-mono uppercase">{Q_TYPE_LABELS[question.type].split(' ')[0]}</span>
       {!locked && (
         <button
-          className="shrink-0 opacity-0 group-hover:opacity-100 text-destructive p-0.5 transition-opacity"
+          className="shrink-0 opacity-0 group-hover/row:opacity-100 text-destructive p-0.5 transition-opacity"
           onClick={e => { e.stopPropagation(); onDelete(); }}
         >
           <Trash2 size={11} />
@@ -695,12 +698,130 @@ function ScoringPanel({ maturityLevels, targetScore, locked, onChangeLevel, onCh
   );
 }
 
+// ─── Cover Panel ─────────────────────────────────────────────────────────────
+
+function CoverPanel({ templateId, locked }: { templateId: string; locked: boolean }) {
+  const tpl = getTemplate(templateId);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const [tagline, setTagline] = useState(tpl?.tagline ?? '');
+  const [definition, setDefinition] = useState(tpl?.definition ?? '');
+  const [explanation, setExplanation] = useState(tpl?.explanation ?? '');
+
+  // Re-sync if template updates externally (e.g. store event)
+  useEffect(() => {
+    const t = getTemplate(templateId);
+    setTagline(t?.tagline ?? '');
+    setDefinition(t?.definition ?? '');
+    setExplanation(t?.explanation ?? '');
+  }, [templateId]);
+
+  const save = (patch: Partial<Template>) => updateTemplate(templateId, patch);
+
+  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => save({ coverImageUrl: ev.target?.result as string });
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const currentImg = getTemplate(templateId)?.coverImageUrl;
+
+  return (
+    <div className="space-y-5">
+      {/* Panel header */}
+      <div className="flex items-center gap-2 pb-3 border-b">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50">
+          <ImageIcon size={15} className="text-sky-600" />
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-foreground">Template Cover</p>
+          <p className="text-[10px] text-muted-foreground">Intro screen shown to assessors & respondents</p>
+        </div>
+      </div>
+
+      {/* Row 1: Tagline — full width */}
+      <div className="space-y-1.5">
+        <Label htmlFor="cov-tagline">Tagline</Label>
+        <Input
+          id="cov-tagline"
+          value={tagline}
+          onChange={e => setTagline(e.target.value)}
+          onBlur={() => save({ tagline })}
+          placeholder="A short subtitle for this template…"
+          disabled={locked}
+        />
+      </div>
+
+      {/* Row 2: About (left, tall) + Cover image (right, smaller) */}
+      <div className="flex gap-4 items-start">
+        <div className="flex-1 space-y-1.5">
+          <Label htmlFor="cov-def">About This Assessment</Label>
+          <Textarea
+            id="cov-def"
+            value={definition}
+            onChange={e => setDefinition(e.target.value)}
+            onBlur={() => save({ definition })}
+            placeholder="Describe what this assessment measures and why it matters…"
+            rows={8}
+            disabled={locked}
+            className="resize-none"
+          />
+        </div>
+
+        <div className="w-48 shrink-0 space-y-1.5">
+          <Label>Cover Image</Label>
+          <div
+            className={`relative group/img rounded-xl overflow-hidden border bg-muted/30 ${!locked ? 'cursor-pointer' : ''}`}
+            style={{ aspectRatio: '4/3' }}
+            onClick={() => !locked && coverInputRef.current?.click()}
+          >
+            {currentImg ? (
+              <img src={currentImg} alt="Cover" className="w-full h-full object-cover" />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full gap-1.5 text-muted-foreground">
+                <Camera size={22} />
+                <span className="text-[11px] text-center px-2">{locked ? 'No image' : 'Click to upload'}</span>
+              </div>
+            )}
+            {!locked && (
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                <Camera size={16} className="text-white" />
+                <span className="text-white text-[11px] font-medium">{currentImg ? 'Change' : 'Upload'}</span>
+              </div>
+            )}
+          </div>
+          {!locked && (
+            <input ref={coverInputRef} type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} />
+          )}
+        </div>
+      </div>
+
+      {/* Row 3: What Will Be Evaluated — full width */}
+      <div className="space-y-1.5">
+        <Label htmlFor="cov-exp">What Will Be Evaluated?</Label>
+        <Textarea
+          id="cov-exp"
+          value={explanation}
+          onChange={e => setExplanation(e.target.value)}
+          onBlur={() => save({ explanation })}
+          placeholder="Explain what aspects will be assessed across sections…"
+          rows={5}
+          disabled={locked}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function TemplateBuilder() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { user } = useAuth();
-  const template = seedTemplates.find(t => t.id === id);
+  const template = seedTemplates.find(t => t.id === id) ?? getTemplates().find(t => t.id === id);
 
   // ── Builder state — seed from store if previously saved, else from mockData ──
   const _meta = id ? getTemplateMeta(id) : null;
@@ -709,18 +830,23 @@ export function TemplateBuilder() {
   const [version, setVersion] = useState(_meta?.version ?? template?.version ?? '1.0');
   const [status, setStatus] = useState<TemplateStatus>(_meta?.status ?? template?.status ?? 'Draft');
   const [sections, setSections] = useState<BuilderSection[]>(() => {
-    if (!id) return SEED_SECTIONS;
+    if (!id) return [];
     const stored = getTemplateSections(id);
     if (stored) return stored;
-    saveTemplateSections(id, SEED_SECTIONS);
-    return SEED_SECTIONS;
+    // Only pre-populate with demo sections for seed templates; new user-created templates start empty
+    const isSeedTemplate = seedTemplates.some(t => t.id === id);
+    if (isSeedTemplate) {
+      saveTemplateSections(id, SEED_SECTIONS);
+      return SEED_SECTIONS;
+    }
+    return [];
   });
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['sec1', 'sec2']));
   const [maturityLevels, setMaturityLevels] = useState<MaturityRow[]>(
     (_meta?.maturityLevels as MaturityRow[] | undefined) ?? DEFAULT_MATURITY
   );
   const [targetScore, setTargetScore] = useState(_meta?.targetScore ?? 70);
-  const [selection, setSelection] = useState<Selection>({ kind: 'scoring' });
+  const [selection, setSelection] = useState<Selection>({ kind: 'cover' });
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   // Refs always hold latest values — guards and save callbacks read these
@@ -735,6 +861,11 @@ export function TemplateBuilder() {
   // ── Dialog ──
   const [activateOpen, setActivateOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [newVersionOpen, setNewVersionOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importResult, setImportResult] = useState<CsvImportResult | null>(null);
+  const [importMode, setImportMode] = useState<'replace' | 'append'>('replace');
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   // ── DnD ──
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -813,6 +944,55 @@ export function TemplateBuilder() {
     setIsDirty(true);
   }, []);
 
+  // ── CSV Import handlers ──
+  const handleCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const text = ev.target?.result as string;
+      const result = parseTemplateCSV(text);
+      setImportResult(result);
+      setImportMode('replace');
+      setImportModalOpen(true);
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be re-selected
+    e.target.value = '';
+  };
+
+  const handleConfirmImport = () => {
+    if (!importResult || importResult.errors.length > 0) return;
+    setSections(prev => importMode === 'replace' ? importResult.sections : [...prev, ...importResult.sections]);
+    const newIds = new Set(importResult.sections.map(s => s.id));
+    setExpandedSections(prev => new Set([...prev, ...newIds]));
+    markDirty();
+    setImportModalOpen(false);
+    setImportResult(null);
+  };
+
+  const handleExportCsv = () => {
+    const csv = exportSectionsToCSV(sectionsRef.current);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${nameRef.current.replace(/[^a-z0-9]/gi, '_')}_sections.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadTemplate = () => {
+    const csv = generateCsvTemplate();
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'gap2action_import_format.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Stable save — reads all refs so always persists the latest values
   const handleSaveDraft = useCallback(() => {
     if (id) {
@@ -844,15 +1024,38 @@ export function TemplateBuilder() {
   useEffect(() => () => unregisterDirtyGuard(), []);
 
   const handleActivateConfirm = () => {
-    setStatus('Active');
     const parts = version.split('.').map(Number);
     parts[parts.length - 1] = (parts[parts.length - 1] ?? 0) + 1;
-    setVersion(parts.join('.'));
+    const newVersion = parts.join('.');
+    setStatus('Active');
+    setVersion(newVersion);
     setActivateOpen(false);
+    setIsDirty(false);
     if (id) {
-      saveTemplateSections(id, sections);
-      updateEvent(id, { status: 'Open' });
+      saveTemplateSections(id, sectionsRef.current);
+      saveTemplateMeta(id, {
+        name: nameRef.current,
+        version: newVersion,
+        status: 'Active',
+        maturityLevels: maturityLevelsRef.current,
+        targetScore: targetScoreRef.current,
+      });
+      // Enforce single Active per family — archive any other Active sibling
+      const allTemplates = getTemplates();
+      getVersionFamily(allTemplates, id).forEach(t => {
+        if (t.id === id || t.status !== 'Active') return;
+        saveTemplate({ ...t, status: 'Archived', updatedAt: new Date().toISOString() });
+        const tMeta = getTemplateMeta(t.id);
+        if (tMeta) saveTemplateMeta(t.id, { ...tMeta, status: 'Archived' });
+      });
     }
+  };
+
+  const handleCreateNewVersionConfirm = () => {
+    if (!id) return;
+    const newId = cloneTemplate(id);
+    setNewVersionOpen(false);
+    navigate(`/templates/${newId}/builder`);
   };
 
   // ── DnD handlers ──
@@ -956,6 +1159,7 @@ export function TemplateBuilder() {
                 <Lock size={11} /> Frozen — read only
               </div>
             )}
+
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -973,8 +1177,41 @@ export function TemplateBuilder() {
               <Eye size={13} className="mr-1.5" /> Preview as Respondent
             </Button>
 
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={sections.length === 0}>
+                  <Download size={13} className="mr-1.5" /> Export CSV
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Export this template's sections as a CSV file</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
+                  <Download size={13} className="mr-1.5" /> CSV Format
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Download blank CSV format reference for import</TooltipContent>
+            </Tooltip>
+
             {!locked && (
               <>
+                <input
+                  ref={csvInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={handleCsvFileChange}
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" size="sm" onClick={() => csvInputRef.current?.click()}>
+                      <Upload size={13} className="mr-1.5" /> Import CSV
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Import sections from a CSV file</TooltipContent>
+                </Tooltip>
                 <Button variant="outline" size="sm" onClick={handleSaveDraft}>
                   <Save size={13} className="mr-1.5" /> Save Draft
                 </Button>
@@ -986,12 +1223,55 @@ export function TemplateBuilder() {
           </div>
         </header>
 
+        {/* ── Frozen banner ── */}
+        {locked && (() => {
+          const major = parseInt(version.split('.')[0], 10);
+          const nextVersion = `${major + 1}.0`;
+          return (
+            <div className="shrink-0 flex items-center justify-between gap-4 border-b bg-amber-50 px-5 py-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Lock size={13} className="text-amber-600 shrink-0" />
+                <div className="text-xs text-amber-800 leading-snug">
+                  <span className="font-semibold">This template is frozen — v{version} is {status} and cannot be edited.</span>
+                  {status === 'Active' && (
+                    <span className="ml-1">To make changes, create a new draft version based on this one.</span>
+                  )}
+                </div>
+              </div>
+              {status === 'Active' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
+                  onClick={() => setNewVersionOpen(true)}
+                >
+                  <GitBranch size={13} className="mr-1.5" /> Create New Version
+                </Button>
+              )}
+            </div>
+          );
+        })()}
+
         {/* ── Body: sidebar + right panel ── */}
         <div className="flex flex-1 min-h-0">
 
           {/* Left sidebar — section tree */}
           <aside className="w-[260px] shrink-0 flex flex-col border-r bg-muted/20 overflow-hidden">
             <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              {/* Fixed Cover button — always at top, never draggable */}
+              <button
+                onClick={() => setSelection({ kind: 'cover' })}
+                className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors mb-1 ${
+                  selection.kind === 'cover'
+                    ? 'bg-sky-50 text-sky-700'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                }`}
+              >
+                <LayoutTemplate size={13} className="shrink-0" />
+                <span className="flex-1 text-left">Template Cover</span>
+                <span className="text-[10px] opacity-60">Intro</span>
+              </button>
+
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
@@ -1064,6 +1344,10 @@ export function TemplateBuilder() {
           {/* Right panel */}
           <main className="flex-1 overflow-y-auto">
             <div className="max-w-2xl mx-auto p-6">
+              {selection.kind === 'cover' && id && (
+                <CoverPanel templateId={id} locked={locked} />
+              )}
+
               {selection.kind === 'scoring' && (
                 <ScoringPanel
                   maturityLevels={maturityLevels}
@@ -1096,7 +1380,7 @@ export function TemplateBuilder() {
               )}
 
               {/* Empty state */}
-              {!selectedSection && !selectedQuestion && selection.kind !== 'scoring' && (
+              {!selectedSection && !selectedQuestion && selection.kind !== 'scoring' && selection.kind !== 'cover' && (
                 <div className="flex flex-col items-center justify-center h-64 text-center">
                   <p className="text-sm text-muted-foreground">Select a section or question from the sidebar to edit it.</p>
                 </div>
@@ -1236,6 +1520,148 @@ export function TemplateBuilder() {
                 ))}
               </div>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Create New Version Dialog ── */}
+        {(() => {
+          const major = parseInt(version.split('.')[0], 10);
+          const nextVersion = `${major + 1}.0`;
+          return (
+            <Dialog open={newVersionOpen} onOpenChange={setNewVersionOpen}>
+              <DialogContent hideClose>
+                <DialogHeader>
+                  <DialogTitle className="text-base font-semibold flex items-center gap-2">
+                    <GitBranch size={16} className="text-primary" />
+                    Create v{nextVersion} Draft?
+                  </DialogTitle>
+                  <DialogDescription className="text-sm text-muted-foreground mt-2 leading-relaxed">
+                    A new editable draft will be created from v{version}.
+                    All existing events using v{version} will be unaffected.
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button variant="ghost" size="sm">Cancel</Button>
+                  </DialogClose>
+                  <Button size="sm" onClick={handleCreateNewVersionConfirm}>
+                    <GitBranch size={13} className="mr-1.5" /> Create Draft
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          );
+        })()}
+
+        {/* ── CSV Import Preview Dialog ── */}
+        <Dialog open={importModalOpen} onOpenChange={open => { if (!open) { setImportModalOpen(false); setImportResult(null); } }}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-base font-semibold flex items-center gap-2">
+                <Upload size={16} className="text-primary" />
+                Import Sections from CSV
+              </DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground">
+                Review the parsed content before importing.
+              </DialogDescription>
+            </DialogHeader>
+
+            {importResult && (
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                {/* Errors */}
+                {importResult.errors.length > 0 && (
+                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-red-700 mb-1.5">
+                      <AlertCircle size={13} /> {importResult.errors.length} error{importResult.errors.length !== 1 ? 's' : ''} — import blocked
+                    </div>
+                    {importResult.errors.map((e, i) => (
+                      <p key={i} className="text-xs text-red-700 font-mono">{e}</p>
+                    ))}
+                  </div>
+                )}
+
+                {/* Warnings */}
+                {importResult.warnings.length > 0 && (
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 mb-1.5">
+                      <AlertTriangle size={13} /> {importResult.warnings.length} warning{importResult.warnings.length !== 1 ? 's' : ''}
+                    </div>
+                    {importResult.warnings.map((w, i) => (
+                      <p key={i} className="text-xs text-amber-700 font-mono">{w}</p>
+                    ))}
+                  </div>
+                )}
+
+                {/* Summary table */}
+                {importResult.sections.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-foreground mb-2">
+                      {importResult.sections.length} section{importResult.sections.length !== 1 ? 's' : ''} · {importResult.sections.reduce((n, s) => n + s.questions.length, 0)} questions total
+                    </p>
+                    <div className="rounded-lg border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/40 border-b">
+                            <th className="px-3 py-2 text-left text-muted-foreground font-medium">Section</th>
+                            <th className="px-3 py-2 text-right text-muted-foreground font-medium w-20">Weight</th>
+                            <th className="px-3 py-2 text-right text-muted-foreground font-medium w-24">Questions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {importResult.sections.map(sec => (
+                            <tr key={sec.id}>
+                              <td className="px-3 py-2 text-foreground">{sec.name}</td>
+                              <td className="px-3 py-2 text-right text-muted-foreground">{sec.weight}%</td>
+                              <td className="px-3 py-2 text-right text-muted-foreground">{sec.questions.length}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Import mode toggle */}
+                {importResult.sections.length > 0 && importResult.errors.length === 0 && (
+                  <div className="flex items-center gap-3 pt-1">
+                    <span className="text-xs font-medium text-foreground">Import mode:</span>
+                    <div className="flex rounded-lg border overflow-hidden text-xs">
+                      {(['replace', 'append'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          onClick={() => setImportMode(mode)}
+                          className={`px-3 py-1.5 capitalize transition-colors ${
+                            importMode === mode
+                              ? 'bg-primary text-primary-foreground font-semibold'
+                              : 'bg-background text-muted-foreground hover:bg-muted/60'
+                          }`}
+                        >
+                          {mode}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="text-[11px] text-muted-foreground">
+                      {importMode === 'replace'
+                        ? 'Replaces all existing sections'
+                        : 'Adds to existing sections'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="ghost" size="sm">Cancel</Button>
+              </DialogClose>
+              <Button
+                size="sm"
+                onClick={handleConfirmImport}
+                disabled={!importResult || importResult.errors.length > 0 || importResult.sections.length === 0}
+              >
+                <Upload size={13} className="mr-1.5" /> Import
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 

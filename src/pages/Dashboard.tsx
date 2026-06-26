@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   ClipboardList, TrendingUp, TrendingDown, Minus,
   AlertCircle, ArrowRight, Calendar, Users, CheckCircle2,
-  ChevronDown, ChevronUp, Plus, FolderOpen, ShieldCheck, Eye, Pencil,
+  ChevronDown, ChevronUp, Plus, FolderOpen, ShieldCheck, Eye, Pencil, AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Badge } from '@/components/ui/badge';
@@ -11,9 +11,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import {
-  events as seedEvents, templates, users, categories,
+  events as seedEvents, templates, users, categories, currentUser,
 } from '@/services/mockData';
-import { getEvents } from '@/services/store';
+import { getEvents, getReturnFeedback } from '@/services/store';
 import type { MaturityLevel, RespondentStatus } from '@/types';
 
 function allEvents() {
@@ -41,11 +41,12 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | 'succ
 };
 
 const RESPONDENT_STATUS_COLOR: Record<RespondentStatus, string> = {
-  'Not Started': 'text-slate-500 bg-slate-100',
-  'In Progress': 'text-blue-700 bg-blue-100',
-  Submitted: 'text-amber-700 bg-amber-100',
-  Validated: 'text-emerald-700 bg-emerald-100',
-  Returned: 'text-orange-700 bg-orange-100',
+  'Not Started':           'text-slate-500 bg-slate-100',
+  'In Progress':           'text-blue-700 bg-blue-100',
+  Submitted:               'text-amber-700 bg-amber-100',
+  Validated:               'text-emerald-700 bg-emerald-100',
+  Returned:                'text-orange-700 bg-orange-100',
+  'Returned for Revision': 'text-amber-700 bg-amber-100 border border-amber-300',
 };
 
 function MaturityPill({ level }: { level: MaturityLevel }) {
@@ -266,27 +267,58 @@ function RespondentDashboard() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {activeEvents
-              .sort((a, b) => new Date(a.endDate).getTime() - new Date(b.endDate).getTime())
+              .sort((a, b) => {
+                const uid = user?.id ?? currentUser.id;
+                const sortRank = (ev: typeof activeEvents[0]) => {
+                  const fb = getReturnFeedback(ev.id, uid);
+                  if (fb !== null) return 0;
+                  if (isOverdue(ev.endDate)) return 1;
+                  const p = ev.respondentProgress.find(p => p.userId === uid);
+                  if (p?.status === 'In Progress') return 2;
+                  if (p?.status === 'Not Started') return 3;
+                  return 4;
+                };
+                const diff = sortRank(a) - sortRank(b);
+                return diff !== 0 ? diff : new Date(a.endDate).getTime() - new Date(b.endDate).getTime();
+              })
               .map(event => {
+                const uid = user?.id ?? currentUser.id;
+                const returnFeedback = getReturnFeedback(event.id, uid);
+                const isReturned = returnFeedback !== null;
                 const progress = myProgress(event);
-                const overdue = isOverdue(event.endDate);
+                const overdue = !isReturned && isOverdue(event.endDate);
                 const tpl = templates.find(t => t.id === event.templateId);
 
                 return (
                   <Card
                     key={event.id}
-                    className={overdue ? 'border-red-300 bg-red-50/30 hover:shadow-md transition-shadow' : 'hover:shadow-md transition-shadow'}
+                    className={
+                      isReturned
+                        ? 'border-amber-300 bg-amber-50/30 hover:shadow-md transition-shadow'
+                        : overdue
+                          ? 'border-red-300 bg-red-50/30 hover:shadow-md transition-shadow'
+                          : 'hover:shadow-md transition-shadow'
+                    }
                   >
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between gap-2">
                         <CardTitle className="text-sm font-semibold leading-snug">{event.name}</CardTitle>
-                        {progress && (
+                        {isReturned ? (
+                          <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                            <AlertTriangle size={10} /> Returned for Revision
+                          </span>
+                        ) : progress ? (
                           <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${RESPONDENT_STATUS_COLOR[progress.status]}`}>
                             {progress.status}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                       <p className="text-xs text-muted-foreground">{tpl?.name}</p>
+                      {isReturned && returnFeedback && (
+                        <p className="text-sm text-amber-700 italic mt-1">
+                          Assessor feedback: "{returnFeedback.length > 80 ? returnFeedback.slice(0, 80) + '…' : returnFeedback}"
+                        </p>
+                      )}
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <div className="flex items-center gap-1.5 text-xs">
@@ -307,7 +339,17 @@ function RespondentDashboard() {
                           />
                         </div>
                       )}
-                      {progress?.completionPct === 100 ? (
+                      {isReturned ? (
+                        <Button
+                          size="sm"
+                          className="w-full bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+                          asChild
+                        >
+                          <Link to={`/events/${event.id}/questionnaire`}>
+                            Revise &amp; Resubmit <ArrowRight size={13} />
+                          </Link>
+                        </Button>
+                      ) : progress?.completionPct === 100 ? (
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" className="flex-1 gap-1.5" asChild>
                             <Link to={`/events/${event.id}/questionnaire?mode=preview`}>

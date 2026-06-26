@@ -28,7 +28,7 @@ import { RoadmapTab } from '@/components/event/RoadmapTab';
 import { CompareTab } from '@/components/event/CompareTab';
 import { useToast } from '@/context/ToastContext';
 import { events as seedEvents, templates, users } from '@/services/mockData';
-import { getEvents, getSubmission, getTemplateSections, saveRespondentAction, getRespondentAction } from '@/services/store';
+import { getEvents, getSubmission, saveSubmission, getTemplateSections, saveRespondentAction, getRespondentAction, getReturnFeedback, getUserAssignedSections, getSectionRespondents } from '@/services/store';
 import type { AssessmentEvent, Template, RespondentProgress, RespondentStatus } from '@/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -59,11 +59,12 @@ function formatRelative(iso?: string) {
 // ─── Status config ────────────────────────────────────────────────────────────
 
 const STATUS_CFG: Record<RespondentStatus, { label: string; textCls: string; bgCls: string; dot: string }> = {
-  'Not Started': { label: 'Not Started', textCls: 'text-slate-600', bgCls: 'bg-slate-100', dot: 'bg-slate-400' },
-  'In Progress': { label: 'In Progress', textCls: 'text-blue-700', bgCls: 'bg-blue-100', dot: 'bg-blue-500' },
-  'Submitted':   { label: 'Submitted',   textCls: 'text-amber-700', bgCls: 'bg-amber-100', dot: 'bg-amber-500' },
-  'Validated':   { label: 'Validated',   textCls: 'text-emerald-700', bgCls: 'bg-emerald-100', dot: 'bg-emerald-500' },
-  'Returned':    { label: 'Returned',    textCls: 'text-orange-700', bgCls: 'bg-orange-100', dot: 'bg-orange-500' },
+  'Not Started':          { label: 'Not Started',          textCls: 'text-slate-600',   bgCls: 'bg-slate-100',   dot: 'bg-slate-400' },
+  'In Progress':          { label: 'In Progress',          textCls: 'text-blue-700',    bgCls: 'bg-blue-100',    dot: 'bg-blue-500' },
+  'Submitted':            { label: 'Submitted',            textCls: 'text-amber-700',   bgCls: 'bg-amber-100',   dot: 'bg-amber-500' },
+  'Validated':            { label: 'Validated',            textCls: 'text-emerald-700', bgCls: 'bg-emerald-100', dot: 'bg-emerald-500' },
+  'Returned':             { label: 'Returned',             textCls: 'text-orange-700',  bgCls: 'bg-orange-100',  dot: 'bg-orange-500' },
+  'Returned for Revision':{ label: 'Returned for Revision',textCls: 'text-amber-700',   bgCls: 'bg-amber-100',   dot: 'bg-amber-500' },
 };
 
 const EVENT_STATUS_VARIANT: Record<string, 'success' | 'warning' | 'secondary' | 'outline'> = {
@@ -156,18 +157,24 @@ function StatusBar({ progress }: { progress: RespondentProgress[] }) {
 }
 
 function ViewResponseSheet({
-  open, userId, eventId, templateId, onClose,
-}: { open: boolean; userId: string | null; eventId: string; templateId: string; onClose: () => void }) {
+  open, userId, event, onClose,
+}: { open: boolean; userId: string | null; event: AssessmentEvent; onClose: () => void }) {
   const uName = userId ? userName(userId) : '';
-  const submission = userId ? getSubmission(eventId, userId) : null;
-  const sections = getTemplateSections(templateId);
+  const submission = userId ? getSubmission(event.id, userId) : null;
+  const allSections = getTemplateSections(event.templateId) ?? [];
+  const allSectionIds = allSections.map(s => s.id);
+  const assignedIds = userId
+    ? getUserAssignedSections(event, userId, allSectionIds)
+    : allSectionIds;
+  const visibleSections = allSections.filter(s => assignedIds.includes(s.id));
+  const isFiltered = assignedIds.length < allSectionIds.length;
 
   type QAPair = { qNum: number; text: string; answer: string; type: string };
   const qaPairs: QAPair[] = [];
 
-  if (submission && sections) {
+  if (submission && visibleSections.length > 0) {
     let qNum = 0;
-    for (const sec of sections) {
+    for (const sec of visibleSections) {
       for (const q of sec.questions) {
         qNum++;
         const raw = submission.answers[q.id];
@@ -196,6 +203,11 @@ function ViewResponseSheet({
           </SheetDescription>
         </SheetHeader>
         <SheetBody className="space-y-5">
+          {isFiltered && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              Viewing <strong>{assignedIds.length}</strong> assigned sections
+            </div>
+          )}
           {!submission ? (
             <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
               <p className="text-sm font-medium text-foreground">No answers submitted yet</p>
@@ -314,12 +326,23 @@ export function EventDashboard() {
     return base.map(p => {
       const action = getRespondentAction(event.id, p.userId);
       if (!action) return p;
-      return {
-        ...p,
-        status: action.status as RespondentProgress['status'],
-        feedback: action.feedback ?? p.feedback,
-        lastActivity: action.actionAt ?? p.lastActivity,
-      };
+      if (action.status === 'Returned for Revision') {
+        return {
+          ...p,
+          status: 'Returned for Revision' as const,
+          feedback: action.feedback ?? p.feedback,
+          returnCount: action.returnCount,
+          lastActivity: action.actionAt ?? p.lastActivity,
+        };
+      }
+      if (action.status === 'Validated') {
+        return {
+          ...p,
+          status: 'Validated' as const,
+          lastActivity: action.actionAt ?? p.lastActivity,
+        };
+      }
+      return p;
     });
   });
   const [viewUserId, setViewUserId] = useState<string | null>(null);
@@ -335,35 +358,75 @@ export function EventDashboard() {
   const submitted = progress.filter(p => p.status === 'Submitted').length;
   const validated = progress.filter(p => p.status === 'Validated').length;
   const notStarted = progress.filter(p => p.status === 'Not Started').length;
-  const inProgress = progress.filter(p => p.status === 'In Progress').length;
+  const inProgress = progress.filter(p => p.status === 'In Progress' || p.status === 'Returned for Revision').length;
   const gaugeValue = event.score ?? Math.round((submitted + validated) / Math.max(1, total) * 100);
   const gaugeLabel = event.score != null ? 'Assessment Score' : 'Completion';
 
   // Actions
   const validateUser = (uid: string) => {
     const now = new Date().toISOString();
+    const existing = getRespondentAction(event.id, uid);
     setProgress(prev => prev.map(p =>
       p.userId === uid ? { ...p, status: 'Validated', lastActivity: now } : p
     ));
-    if (event) saveRespondentAction(event.id, uid, { status: 'Validated', actionAt: now });
+    saveRespondentAction(event.id, uid, {
+      status: 'Validated',
+      returnCount: existing?.returnCount ?? 0,
+      actionAt: now,
+    });
     toast({ title: 'Response validated', variant: 'success' });
   };
 
   const returnUser = (uid: string, feedback: string) => {
     const now = new Date().toISOString();
+
+    // 1. Load existing action to carry forward returnCount
+    const existing = getRespondentAction(event.id, uid);
+    const returnCount = (existing?.returnCount ?? 0) + 1;
+
+    // 2. Persist to store
+    saveRespondentAction(event.id, uid, {
+      status: 'Returned for Revision',
+      feedback,
+      returnedAt: now,
+      returnCount,
+      actionAt: now,
+    });
+
+    // 3. Demote submission status so it no longer counts as Submitted
+    const sub = getSubmission(event.id, uid);
+    if (sub) {
+      saveSubmission(event.id, uid, { ...sub, status: 'In Progress' });
+    }
+
+    // 4. Update local UI state
     setProgress(prev => prev.map(p =>
-      p.userId === uid ? { ...p, status: 'Returned', feedback, lastActivity: now } : p
+      p.userId === uid
+        ? { ...p, status: 'Returned for Revision', feedback, returnCount, lastActivity: now }
+        : p
     ));
-    if (event) saveRespondentAction(event.id, uid, { status: 'Returned', feedback, actionAt: now });
     setReturnUserId(null);
-    toast({ title: 'Response returned for revision', description: 'The respondent has been notified.', variant: 'warning' });
+    toast({ title: 'Submission returned for revision', description: 'The respondent will be asked to revise.', variant: 'warning' });
   };
+
+  // Template sections — computed once for badge + overdue logic
+  const templateSections = getTemplateSections(event.templateId) ?? [];
+  const allTemplateSectionIds = templateSections.map(s => s.id);
+  const isPastDue = new Date(event.endDate) < new Date();
+
+  const hasAssignedSection = (uid: string) =>
+    getUserAssignedSections(event, uid, allTemplateSectionIds).length > 0;
 
   // Filter submissions
   const filteredProgress = progress.filter(p => {
     if (filter === 'pending') return p.status === 'Submitted';
     if (filter === 'not-started') return p.status === 'Not Started';
-    if (filter === 'overdue') return p.status !== 'Submitted' && p.status !== 'Validated' && new Date(event.endDate) < new Date();
+    if (filter === 'overdue') {
+      return hasAssignedSection(p.userId)
+        && p.status !== 'Submitted'
+        && p.status !== 'Validated'
+        && isPastDue;
+    }
     return true;
   });
 
@@ -584,7 +647,7 @@ export function EventDashboard() {
                     { key: 'all', label: 'All', count: total },
                     { key: 'pending', label: 'Pending Validation', count: submitted },
                     { key: 'not-started', label: 'Not Started', count: notStarted },
-                    { key: 'overdue', label: 'Overdue', count: progress.filter(p => p.status !== 'Submitted' && p.status !== 'Validated' && new Date(event.endDate) < new Date()).length },
+                    { key: 'overdue', label: 'Overdue', count: progress.filter(p => hasAssignedSection(p.userId) && p.status !== 'Submitted' && p.status !== 'Validated' && isPastDue).length },
                   ] as const).map(f => (
                     <button
                       key={f.key}
@@ -623,6 +686,11 @@ export function EventDashboard() {
                     <tbody className="divide-y">
                       {filteredProgress.map(p => {
                         const cfg = STATUS_CFG[p.status];
+                        const submission = getSubmission(event.id, p.userId);
+                        const completionPct = submission?.completionPct ?? 0;
+                        const assignedCount = event.sectionAssignments
+                          ? getUserAssignedSections(event, p.userId, allTemplateSectionIds).length
+                          : null;
                         return (
                           <tr key={p.userId} className="group hover:bg-muted/20 transition-colors">
                             {/* Respondent */}
@@ -630,11 +698,18 @@ export function EventDashboard() {
                               <div className="flex items-center gap-3">
                                 <UserAvatar name={userName(p.userId)} initials={userInitials(p.userId)} size="sm" />
                                 <div className="min-w-0">
-                                  <p className="font-medium text-foreground truncate">{userName(p.userId)}</p>
-                                  {p.status === 'Returned' && p.feedback && (
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="font-medium text-foreground truncate">{userName(p.userId)}</p>
+                                    {assignedCount !== null && (
+                                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                                        Sections: {assignedCount}/{templateSections.length}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {(p.status === 'Returned' || p.status === 'Returned for Revision') && p.feedback && (
                                     <Tooltip>
                                       <TooltipTrigger asChild>
-                                        <p className="text-xs text-orange-600 truncate max-w-[180px] cursor-help">
+                                        <p className="text-xs text-amber-700 truncate max-w-[180px] cursor-help">
                                           ↩ {p.feedback}
                                         </p>
                                       </TooltipTrigger>
@@ -650,16 +725,23 @@ export function EventDashboard() {
                             </td>
                             {/* Status */}
                             <td className="px-4 py-3.5">
-                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${cfg.bgCls} ${cfg.textCls}`}>
-                                <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
-                                {cfg.label}
-                              </span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${cfg.bgCls} ${cfg.textCls}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
+                                  {cfg.label}
+                                </span>
+                                {p.status === 'Returned for Revision' && (p.returnCount ?? 0) > 1 && (
+                                  <span className="text-[10px] text-muted-foreground">
+                                    (returned {p.returnCount}x)
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             {/* Completion */}
                             <td className="px-4 py-3.5 hidden lg:table-cell">
                               <div className="flex items-center justify-end gap-2">
-                                <Progress value={p.completionPct} className="h-1.5 w-20" />
-                                <span className="text-xs text-muted-foreground w-8 text-right">{p.completionPct}%</span>
+                                <Progress value={completionPct} className="h-1.5 w-20" />
+                                <span className="text-xs text-muted-foreground w-8 text-right">{completionPct}%</span>
                               </div>
                             </td>
                             {/* Last activity */}
@@ -787,8 +869,7 @@ export function EventDashboard() {
       <ViewResponseSheet
         open={viewUserId !== null}
         userId={viewUserId}
-        eventId={event.id}
-        templateId={event.templateId}
+        event={event}
         onClose={() => setViewUserId(null)}
       />
       <ReturnDialog
