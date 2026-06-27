@@ -589,9 +589,9 @@ function QuestionForm({ question, locked, onChange, qTypeLabels = Q_TYPE_LABELS 
 
       {/* Free Text */}
       {question.type === 'free-text' && (
-        <div className="flex items-start gap-2.5 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3">
-          <Info size={14} className="text-blue-600 mt-0.5 shrink-0" />
-          <p className="text-xs text-blue-700">
+        <div className="flex items-start gap-2.5 rounded-lg bg-primary/8 border border-primary/20 px-4 py-3">
+          <Info size={14} className="text-primary mt-0.5 shrink-0" />
+          <p className="text-xs text-primary/80">
             Text answers are used for AI context and qualitative analysis only. No numeric score is applied.
           </p>
         </div>

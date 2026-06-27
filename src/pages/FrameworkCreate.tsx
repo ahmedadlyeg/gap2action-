@@ -92,7 +92,7 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base font-semibold">
-            <Eye size={16} className="text-blue-600" />
+            <Eye size={16} className="text-primary" />
             Question Preview — {INFO[type]?.label}
           </DialogTitle>
           <p className="text-xs text-muted-foreground mt-1">{INFO[type]?.description}</p>
@@ -101,7 +101,7 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
         {/* Question card mock */}
         <div className="rounded-xl border bg-slate-50 p-5 space-y-4">
           <div className="space-y-1">
-            <p className="text-xs font-medium text-blue-600 uppercase tracking-wide">Sample Question</p>
+            <p className="text-xs font-medium text-primary uppercase tracking-wide">Sample Question</p>
             <p className="text-sm font-semibold text-foreground leading-snug">
               {type === 'rating-scale'    && 'How would you rate the maturity of the current process?'}
               {type === 'single-choice'   && 'Which best describes your organisation\'s current adoption level?'}
@@ -130,8 +130,8 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
                     onClick={() => setRatingVal(n)}
                     className={`flex-1 flex flex-col items-center gap-1 py-3 rounded-lg border-2 text-sm font-bold transition-all ${
                       (ratingVal === n || (ratingHover >= n && ratingVal < n))
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : 'border-border bg-white text-slate-500 hover:border-blue-300'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-white text-slate-500 hover:border-primary/40'
                     }`}
                   >
                     <Star
@@ -147,7 +147,7 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
                 <span>High maturity</span>
               </div>
               {ratingVal > 0 && (
-                <p className="text-xs text-center text-blue-600 font-medium">
+                <p className="text-xs text-center text-primary font-medium">
                   Selected: {ratingVal} / 5
                 </p>
               )}
@@ -161,7 +161,7 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
                 <label
                   key={opt}
                   className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
-                    singleVal === opt ? 'border-blue-500 bg-blue-50' : 'border-border bg-white hover:border-blue-300'
+                    singleVal === opt ? 'border-primary bg-primary/10' : 'border-border bg-white hover:border-primary/40'
                   }`}
                 >
                   <input
@@ -169,7 +169,7 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
                     name="single-preview"
                     checked={singleVal === opt}
                     onChange={() => setSingleVal(opt)}
-                    className="accent-blue-600"
+                    className="accent-[#0c93ac]"
                   />
                   <span className="text-sm text-foreground">{opt}</span>
                 </label>
@@ -184,20 +184,20 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
                 <label
                   key={opt}
                   className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
-                    multiVals.includes(opt) ? 'border-blue-500 bg-blue-50' : 'border-border bg-white hover:border-blue-300'
+                    multiVals.includes(opt) ? 'border-primary bg-primary/10' : 'border-border bg-white hover:border-primary/40'
                   }`}
                 >
                   <input
                     type="checkbox"
                     checked={multiVals.includes(opt)}
                     onChange={() => toggleMulti(opt)}
-                    className="accent-blue-600"
+                    className="accent-[#0c93ac]"
                   />
                   <span className="text-sm text-foreground">{opt}</span>
                 </label>
               ))}
               {multiVals.length > 0 && (
-                <p className="text-xs text-blue-600 font-medium">{multiVals.length} selected</p>
+                <p className="text-xs text-primary font-medium">{multiVals.length} selected</p>
               )}
             </div>
           )}
@@ -270,7 +270,7 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
                   max={100}
                   value={pct}
                   onChange={e => setPct(Number(e.target.value))}
-                  className="flex-1 accent-blue-600"
+                  className="flex-1 accent-[#0c93ac]"
                 />
                 <div className={`flex h-12 w-16 items-center justify-center rounded-lg border-2 font-bold text-lg shrink-0 ${
                   pct < 33 ? 'border-red-300 bg-red-50 text-red-700'
@@ -299,8 +299,8 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
                     onClick={() => setFreq(opt)}
                     className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-lg border-2 transition-all text-xs font-medium ${
                       freq === opt
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : 'border-border bg-white text-slate-500 hover:border-blue-300'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-white text-slate-500 hover:border-primary/40'
                     }`}
                   >
                     <span className="text-base">{['🚫','🔹','🔸','🔶','✅'][i]}</span>
@@ -309,7 +309,7 @@ function QuestionPreview({ type, onClose }: { type: QuestionType; onClose: () =>
                 ))}
               </div>
               {freq && (
-                <p className="text-xs text-center text-blue-600 font-medium">Selected: {freq}</p>
+                <p className="text-xs text-center text-primary font-medium">Selected: {freq}</p>
               )}
             </div>
           )}
@@ -548,7 +548,7 @@ export function FrameworkCreate() {
                   type="button"
                   onClick={() => setPreviewType(type)}
                   title={`Preview ${label}`}
-                  className="shrink-0 mr-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-blue-600 transition-colors"
+                  className="shrink-0 mr-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-primary transition-colors"
                 >
                   <Eye size={13} />
                 </button>

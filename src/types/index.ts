@@ -105,6 +105,25 @@ export interface Recommendation {
   createdAt: string;
 }
 
+export type RecStatus = 'AI Draft' | 'Under Review' | 'Approved' | 'Noted' | 'Converted';
+
+export interface RecConvMessage {
+  id: string;
+  role: 'assessor' | 'ai';
+  text: string;
+}
+
+export interface EventRec {
+  id: string;
+  eventId: string;
+  sectionName: string;
+  gapMagnitude: number;  // negative number, e.g. -1.2
+  status: RecStatus;
+  currentText: string;
+  originalText: string;
+  conversation: RecConvMessage[];
+}
+
 export type TaskEffort = 'Small' | 'Medium' | 'Large';
 
 export interface Task {

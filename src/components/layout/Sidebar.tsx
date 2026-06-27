@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useDirtyState } from '@/context/DirtyStateContext';
 import {
   LayoutDashboard, FolderOpen, Users, BarChart2,
-  ChevronDown, ChevronRight, LogOut, CalendarCheck,
-  Building2, Zap, LayoutTemplate, PanelLeftClose, PanelLeftOpen, TrendingUp, LayoutGrid, ListChecks,
+  ChevronDown, ChevronRight, LogOut, CalendarDays,
+  Building2, Zap, LayoutTemplate, PanelLeftClose, PanelLeftOpen,
+  TrendingUp, LayoutGrid, ListChecks, CheckSquare, FileText, Settings2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -20,16 +21,6 @@ const categoryIcons: Record<string, React.ElementType> = {
   'zap': Zap,
 };
 
-// Icon colour → 3D badge class
-const NAV_COLORS = {
-  blue:   'icon-3d icon-3d-blue',
-  orange: 'icon-3d icon-3d-orange',
-  green:  'icon-3d icon-3d-green',
-  purple: 'icon-3d icon-3d-purple',
-  teal:   'icon-3d icon-3d-teal',
-} as const;
-type NavColor = keyof typeof NAV_COLORS;
-
 interface SidebarProps { collapsed: boolean; onToggle: () => void; }
 
 interface NavItemProps {
@@ -38,30 +29,49 @@ interface NavItemProps {
   label: string;
   collapsed: boolean;
   end?: boolean;
-  color?: NavColor;
+  badge?: string | number;
 }
 
-function NavItem({ to, icon: Icon, label, collapsed, end, color = 'blue' }: NavItemProps) {
+function NavItem({ to, icon: Icon, label, collapsed, end, badge }: NavItemProps) {
   const { requestNavigation } = useDirtyState();
+  const location = useLocation();
+  const isExact = end ?? to === '/';
+  const isActive = isExact
+    ? location.pathname === to
+    : location.pathname === to || location.pathname.startsWith(to + '/');
 
   const item = (
     <NavLink
       to={to}
-      end={end ?? to === '/'}
+      end={isExact}
       onClick={e => { e.preventDefault(); requestNavigation(to); }}
-      className={({ isActive }) =>
-        cn(
-          'flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold transition-all duration-150 group',
-          isActive
-            ? 'bg-white/12 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
-            : 'text-sidebar-muted hover:bg-white/7 hover:text-white'
-        )
-      }
+      className={cn(
+        'relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-150 group',
+        isActive
+          ? 'bg-[#0c93ac] text-white font-semibold shadow-[0_2px_8px_rgba(19,180,207,.30)]'
+          : 'text-slate-500 font-medium hover:bg-black/5 hover:text-slate-800'
+      )}
     >
-      <div className={cn(NAV_COLORS[color], 'h-8 w-8')}>
-        <Icon size={15} className="text-white" />
-      </div>
-      {!collapsed && <span className="truncate">{label}</span>}
+      <Icon
+        size={16}
+        className={cn(
+          'shrink-0 transition-colors',
+          isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'
+        )}
+      />
+      {!collapsed && (
+        <>
+          <span className="truncate flex-1">{label}</span>
+          {badge !== undefined && (
+            <span className={cn(
+              'ml-auto text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center',
+              isActive ? 'bg-white/25 text-white' : 'bg-black/8 text-slate-500'
+            )}>
+              {badge}
+            </span>
+          )}
+        </>
+      )}
     </NavLink>
   );
 
@@ -77,10 +87,10 @@ function NavItem({ to, icon: Icon, label, collapsed, end, color = 'blue' }: NavI
 }
 
 function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean }) {
-  if (collapsed) return <div className="my-3 border-t border-sidebar-border mx-2" />;
+  if (collapsed) return <div className="my-3 mx-3 h-px bg-black/8" />;
   return (
-    <div className="pt-5 pb-1.5 px-3">
-      <p className="text-[9.5px] font-bold uppercase tracking-[0.12em] text-sidebar-muted/70">{label}</p>
+    <div className="pt-5 pb-2 px-3">
+      <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</p>
     </div>
   );
 }
@@ -98,13 +108,13 @@ function LogoMark({ size = 28 }: { size?: number }) {
           boxShadow: '0 3px 10px rgba(232,148,26,.55),inset 0 1px 0 rgba(255,255,255,.22)',
         }}
       >G</div>
-      {/* 2 tile — blue */}
+      {/* 2 tile — cyan */}
       <div
         className="flex items-center justify-center rounded-[6px] text-white font-black"
         style={{
           width: size, height: size, fontSize: size * 0.52,
-          background: 'linear-gradient(145deg,#5B78E8,#2D49C8)',
-          boxShadow: '0 3px 10px rgba(56,86,212,.55),inset 0 1px 0 rgba(255,255,255,.22)',
+          background: 'linear-gradient(145deg,#2fc8e0,#0c7689)',
+          boxShadow: '0 3px 10px rgba(19,180,207,.55),inset 0 1px 0 rgba(255,255,255,.22)',
         }}
       >2</div>
       {/* Chart bars — green */}
@@ -150,10 +160,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     <TooltipProvider delayDuration={0}>
       <aside
         className={cn(
-          'flex h-screen flex-col border-r border-sidebar-border transition-all duration-250',
-          collapsed ? 'w-[68px]' : 'w-[268px]'
+          'flex h-full flex-col sidebar-float bg-sidebar transition-all duration-250 overflow-hidden shrink-0',
+          collapsed ? 'w-[68px] rounded-2xl' : 'w-[260px] rounded-2xl'
         )}
-        style={{ background: 'linear-gradient(180deg,#0B1629 0%,#0D1C38 100%)' }}
+        
       >
         {/* ── Logo ── */}
         <div className={cn(
@@ -165,14 +175,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <div className="flex items-center gap-3 min-w-0">
                 <LogoMark size={28} />
                 <div className="min-w-0">
-                  <p className="text-sm font-extrabold text-white leading-none tracking-wide">Gap2Action</p>
-                  <p className="text-[9px] text-sidebar-muted leading-none mt-1 tracking-[0.1em] uppercase">
+                  <p className="text-sm font-extrabold text-slate-800 leading-none tracking-wide">Gap2Action</p>
+                  <p className="text-[9px] text-slate-400 leading-none mt-1 tracking-[0.1em] uppercase">
                     Assess · Understand · Advance
                   </p>
                 </div>
               </div>
               <Button variant="ghost" size="icon" onClick={onToggle}
-                className="h-7 w-7 shrink-0 text-sidebar-muted hover:text-white hover:bg-white/8">
+                className="h-7 w-7 shrink-0 text-slate-400 hover:text-slate-700 hover:bg-black/5">
                 <PanelLeftClose size={15} />
               </Button>
             </>
@@ -187,30 +197,30 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           {/* Respondent */}
           {role === 'respondent' && (
             <>
-              <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} color="blue" />
-              <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} color="green" />
+              <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} />
+              <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} />
             </>
           )}
 
           {/* Assessor */}
           {role === 'assessor' && (
             <>
-              <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} color="blue" />
-              <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} color="green" />
-              <NavItem to="/" icon={CalendarCheck} label="My Events" collapsed={collapsed} color="orange" end={false} />
-              <NavItem to="/tasks" icon={ListChecks} label="All Tasks" collapsed={collapsed} color="green" />
+              <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} />
+              <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} />
+              <NavItem to="/" icon={CalendarDays} label="My Events" collapsed={collapsed} end={false} />
+              <NavItem to="/tasks" icon={ListChecks} label="All Tasks" collapsed={collapsed} />
               <SectionLabel label="Tools" collapsed={collapsed} />
-              <NavItem to="/categories" icon={FolderOpen} label="All Categories" collapsed={collapsed} color="green" />
+              <NavItem to="/categories" icon={FolderOpen} label="All Categories" collapsed={collapsed} />
             </>
           )}
 
           {/* Admin */}
           {role === 'admin' && (
             <>
-              <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} color="blue" />
-              <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} color="green" />
-              <NavItem to="/reports" icon={BarChart2} label="Reports" collapsed={collapsed} color="orange" />
-              <NavItem to="/tasks" icon={ListChecks} label="All Tasks" collapsed={collapsed} color="green" />
+              <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} />
+              <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} />
+              <NavItem to="/reports" icon={BarChart2} label="Reports" collapsed={collapsed} />
+              <NavItem to="/tasks" icon={ListChecks} label="All Tasks" collapsed={collapsed} />
 
               <SectionLabel label="Assessment Categories" collapsed={collapsed} />
 
@@ -270,22 +280,20 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
                 return (
                   <Collapsible key={cat.id} open={isExpanded} onOpenChange={() => toggleCat(cat.id)}>
-                    <div className="flex items-center rounded-xl hover:bg-white/7 transition-colors group">
+                    <div className="flex items-center rounded-xl hover:bg-black/5 transition-colors group">
                       <button
                         onClick={() => requestNavigation(`/categories/${cat.id}/templates`)}
-                        className="flex flex-1 items-center gap-3 px-2.5 py-2 text-sm font-semibold text-sidebar-muted hover:text-white min-w-0"
+                        className="flex flex-1 items-center gap-3 px-3 py-2 text-sm font-medium text-slate-500 hover:text-slate-800 min-w-0"
                       >
-                        <div className="icon-3d h-8 w-8 shrink-0" style={{
-                          background: `linear-gradient(145deg,${cat.color}cc,${cat.color})`,
-                          boxShadow: `0 4px 12px ${cat.color}44,inset 0 1px 0 rgba(255,255,255,.2)`,
-                        }}>
-                          <Icon size={15} className="text-white" />
-                        </div>
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
+                          style={{ background: `${cat.color}14`, color: cat.color }}>
+                          <Icon size={14} />
+                        </span>
                         <span className="flex-1 truncate text-left">{cat.name}</span>
-                        <span className="text-[10px] text-sidebar-muted/60 mr-1 font-normal">{catTemplates.length}</span>
+                        <span className="text-[10px] text-slate-300 mr-1 font-normal">{catTemplates.length}</span>
                       </button>
                       <CollapsibleTrigger asChild>
-                        <button className="px-2 py-2 text-sidebar-muted hover:text-white shrink-0">
+                        <button className="px-2 py-2 text-slate-300 hover:text-slate-600 shrink-0">
                           {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                         </button>
                       </CollapsibleTrigger>
@@ -302,7 +310,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                                 'flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors',
                                 isActive
                                   ? 'text-white bg-white/10'
-                                  : 'text-sidebar-muted hover:text-white hover:bg-white/7'
+                                  : 'text-slate-400 hover:text-slate-700 hover:bg-black/5'
                               )
                             }
                           >
@@ -318,9 +326,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               })}
 
               <SectionLabel label="Administration" collapsed={collapsed} />
-              <NavItem to="/admin/frameworks" icon={LayoutGrid} label="Assessment Frameworks" collapsed={collapsed} color="teal" />
-              <NavItem to="/categories" icon={FolderOpen} label="Manage Categories" collapsed={collapsed} color="teal" />
-              <NavItem to="/users" icon={Users} label="User Management" collapsed={collapsed} color="purple" />
+              <NavItem to="/admin/frameworks" icon={LayoutGrid} label="Assessment Frameworks" collapsed={collapsed} />
+              <NavItem to="/categories" icon={FolderOpen} label="Manage Categories" collapsed={collapsed} />
+              <NavItem to="/users" icon={Users} label="User Management" collapsed={collapsed} />
             </>
           )}
         </nav>
@@ -329,8 +337,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <div className="shrink-0 border-t border-sidebar-border p-3">
           {collapsed ? (
             <div className="flex flex-col items-center gap-2">
-              <Avatar className="h-8 w-8 ring-2 ring-sidebar-accent/30">
-                <AvatarFallback className="text-[11px] font-bold bg-gradient-to-br from-[#4B6CE8] to-[#2D49C8] text-white">
+              <Avatar className="h-8 w-8 ring-2 ring-[#13b4cf]/30">
+                <AvatarFallback className="text-[11px] font-bold bg-gradient-to-br from-[#13b4cf] to-[#0c7689] text-white">
                   {user?.initials ?? '?'}
                 </AvatarFallback>
               </Avatar>
@@ -340,21 +348,21 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               </Button>
             </div>
           ) : (
-            <div className="flex items-center gap-3 rounded-xl bg-white/5 px-3 py-2.5">
+            <div className="flex items-center gap-3 rounded-xl bg-black/5 border border-sidebar-border px-3 py-2.5">
               <Avatar className="h-8 w-8 shrink-0 ring-2 ring-sidebar-accent/30">
-                <AvatarFallback className="text-[11px] font-bold bg-gradient-to-br from-[#4B6CE8] to-[#2D49C8] text-white">
+                <AvatarFallback className="text-[11px] font-bold bg-gradient-to-br from-[#13b4cf] to-[#0c7689] text-white">
                   {user?.initials ?? '?'}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-white truncate">{user?.name}</p>
-                <p className="text-[10px] text-sidebar-muted capitalize mt-0.5">{user?.role}</p>
+                <p className="text-xs font-bold text-slate-800 truncate">{user?.name}</p>
+                <p className="text-[10px] text-slate-400 capitalize mt-0.5">{user?.role}</p>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={handleLogout}
-                className="h-7 w-7 shrink-0 text-sidebar-muted hover:text-white hover:bg-white/8"
+                className="h-7 w-7 shrink-0 text-slate-400 hover:text-slate-700 hover:bg-black/5"
               >
                 <LogOut size={14} />
               </Button>

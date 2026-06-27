@@ -178,7 +178,7 @@ function Breadcrumb({ drillLevel, categoryName, templateName, onOrgClick, onCate
   if (drillLevel === 0) return null;
   return (
     <nav className="flex items-center gap-1.5 text-sm text-slate-500 mb-4 flex-wrap">
-      <button onClick={onOrgClick} className="hover:text-blue-600 font-medium">
+      <button onClick={onOrgClick} className="hover:text-primary font-medium">
         Maturity Levels
       </button>
       {drillLevel >= 1 && categoryName && (
@@ -187,7 +187,7 @@ function Breadcrumb({ drillLevel, categoryName, templateName, onOrgClick, onCate
           {drillLevel === 1 ? (
             <span className="text-slate-700 font-semibold">{categoryName}</span>
           ) : (
-            <button onClick={onCategoryClick} className="hover:text-blue-600 font-medium">
+            <button onClick={onCategoryClick} className="hover:text-primary font-medium">
               {categoryName}
             </button>
           )}
@@ -340,7 +340,7 @@ function Level0({ data, onCategoryClick }: Level0Props) {
             <span className="text-lg text-slate-400">/{data.totalTemplates}</span>
           </p>
           <div className="w-full bg-slate-100 rounded-full h-1.5 mt-2">
-            <div className="h-1.5 rounded-full bg-blue-500" style={{ width: `${assessedPct}%` }} />
+            <div className="h-1.5 rounded-full bg-primary" style={{ width: `${assessedPct}%` }} />
           </div>
           <p className="text-xs text-slate-400 mt-1">{assessedPct}% coverage</p>
         </KpiCard>
@@ -397,7 +397,7 @@ function Level0({ data, onCategoryClick }: Level0Props) {
                     {cat.categoryName}
                   </p>
                   <MaturityBadge score={cat.avgScore} size="sm" />
-                  <p className="text-[10px] text-blue-600 group-hover:underline">View Details →</p>
+                  <p className="text-[10px] text-primary group-hover:underline">View Details →</p>
                 </button>
               ))
             )}
@@ -451,7 +451,7 @@ function Level0({ data, onCategoryClick }: Level0Props) {
               )}
             </div>
 
-            <p className="text-xs font-semibold text-blue-600 group-hover:underline">View Details →</p>
+            <p className="text-xs font-semibold text-primary group-hover:underline">View Details →</p>
           </button>
         ))}
       </div>
@@ -472,7 +472,7 @@ function Level1({ category, onBack, onTemplateClick }: Level1Props) {
     <>
       {/* Header */}
       <div className="flex items-start gap-3 mb-6">
-        <button onClick={onBack} className="mt-1 text-slate-400 hover:text-blue-600 transition-colors">
+        <button onClick={onBack} className="mt-1 text-slate-400 hover:text-primary transition-colors">
           <ChevronLeft size={20} />
         </button>
         <div>
@@ -496,7 +496,7 @@ function Level1({ category, onBack, onTemplateClick }: Level1Props) {
             <button
               key={t.templateId}
               onClick={() => onTemplateClick(t.templateId)}
-              className="flex flex-col items-center p-4 rounded-2xl border border-slate-100 hover:border-blue-200 hover:shadow-md transition-all group"
+              className="flex flex-col items-center p-4 rounded-2xl border border-slate-100 hover:border-primary/30 hover:shadow-md transition-all group"
             >
               <DonutGauge score={t.currentScore} target={t.targetScore} size={120} />
               <p className="text-xs font-semibold text-slate-700 mt-2 text-center leading-snug line-clamp-2">
@@ -508,7 +508,7 @@ function Level1({ category, onBack, onTemplateClick }: Level1Props) {
               {t.targetScore != null && (
                 <p className="text-[10px] text-slate-400 mt-1">Target {formatScore(t.targetScore)}</p>
               )}
-              <p className="text-[10px] text-blue-600 mt-1.5 group-hover:underline">Drill Down →</p>
+              <p className="text-[10px] text-primary mt-1.5 group-hover:underline">Drill Down →</p>
             </button>
           ))}
         </div>
@@ -557,7 +557,7 @@ function Level1({ category, onBack, onTemplateClick }: Level1Props) {
                   <td className="px-4 py-3">
                     <button
                       onClick={e => { e.stopPropagation(); onTemplateClick(t.templateId); }}
-                      className="text-xs font-semibold text-blue-600 hover:underline whitespace-nowrap"
+                      className="text-xs font-semibold text-primary hover:underline whitespace-nowrap"
                     >
                       Drill Down →
                     </button>
@@ -588,7 +588,7 @@ function Level2({ template, category, onBack }: Level2Props) {
     <>
       {/* Header */}
       <div className="flex items-start gap-3 mb-6">
-        <button onClick={onBack} className="mt-1 text-slate-400 hover:text-blue-600 transition-colors">
+        <button onClick={onBack} className="mt-1 text-slate-400 hover:text-primary transition-colors">
           <ChevronLeft size={20} />
         </button>
         <div className="flex-1 min-w-0">
@@ -699,7 +699,7 @@ function Level2({ template, category, onBack }: Level2Props) {
                         <span className="text-xs text-slate-400">{h.date}</span>
                         <MaturityBadge score={h.score} size="sm" />
                         {isLast && (
-                          <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded-full px-2 py-0.5 font-semibold">
+                          <span className="text-xs bg-primary/10 text-primary border border-primary/20 rounded-full px-2 py-0.5 font-semibold">
                             Latest
                           </span>
                         )}
@@ -707,7 +707,7 @@ function Level2({ template, category, onBack }: Level2Props) {
                       <ScoreBar current={h.score} target={template.targetScore} height={6} />
                       <Link
                         to={`/events/${h.eventId}/results`}
-                        className="text-xs font-semibold text-blue-600 hover:underline w-fit"
+                        className="text-xs font-semibold text-primary hover:underline w-fit"
                       >
                         View Results →
                       </Link>

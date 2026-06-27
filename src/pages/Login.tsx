@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,7 @@ function LogoMark({ size = 36 }: { size?: number }) {
         className="flex items-center justify-center rounded-[8px] text-white font-black"
         style={{
           width: size, height: size, fontSize: size * 0.5,
-          background: 'linear-gradient(145deg,#5B78E8,#2D49C8)',
+          background: 'linear-gradient(145deg,#2fc8e0,#0c7689)',
           boxShadow: '0 6px 18px rgba(56,86,212,.55),inset 0 1px 0 rgba(255,255,255,.22)',
         }}
       >2</div>
@@ -44,7 +44,6 @@ function LogoMark({ size = 36 }: { size?: number }) {
 
 export function Login() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { login, isLoading } = useAuth();
 
   const [email, setEmail] = useState('');
@@ -54,14 +53,12 @@ export function Login() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
 
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? '/';
-
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     const ok = await login(email, password);
     if (ok) {
-      navigate(from, { replace: true });
+      navigate('/', { replace: true });
     } else {
       setError('The email or password you entered is incorrect. Please try again.');
     }
@@ -231,7 +228,7 @@ export function Login() {
                 type="checkbox"
                 checked={rememberMe}
                 onChange={e => setRememberMe(e.target.checked)}
-                className="h-4 w-4 rounded cursor-pointer accent-[#5B78E8]"
+                className="h-4 w-4 rounded cursor-pointer accent-[#0c93ac]"
               />
               <label htmlFor="remember" className="text-sm cursor-pointer select-none"
                 style={{ color: 'rgba(255,255,255,.5)' }}>
@@ -248,7 +245,7 @@ export function Login() {
               disabled={isLoading}
               className="relative flex w-full items-center justify-center gap-2.5 rounded-xl py-3 text-sm font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
               style={{
-                background: 'linear-gradient(135deg, #5B78E8 0%, #2D49C8 100%)',
+                background: 'linear-gradient(120deg, #13b4cf 0%, #2e7de0 38%, #7b2ff7 100%)',
                 boxShadow: '0 6px 22px rgba(56,86,212,.45)',
               }}
               onMouseEnter={e => {

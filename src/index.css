@@ -1,63 +1,86 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
 @theme {
-  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
-  --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-sans:    'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-display: 'Sora', 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
   --radius: 0.75rem;
 
-  /* ── Brand palette (from logo) ─────────────────────────── */
-  /* Orange: #E8941A  |  Blue: #3856D4  |  Green: #4DB88A   */
+  /* ── Brand palette — cyan → blue → violet → magenta ──────── */
+  --color-primary:            #0c93ac;
+  --color-primary-foreground: #ffffff;
 
-  --color-primary: hsl(231 64% 52%);
-  --color-primary-foreground: hsl(0 0% 100%);
+  /* Page canvas — cool slate */
+  --color-background:         #f4f6f8;
+  --color-foreground:         #161c25;
 
-  --color-background: hsl(226 55% 97%);
-  --color-foreground: hsl(224 65% 16%);
+  --color-muted:              #eaeef2;
+  --color-muted-foreground:   #6b7888;
 
-  --color-muted: hsl(220 38% 92%);
-  --color-muted-foreground: hsl(220 18% 50%);
+  --color-border:             #dbe1e8;
+  --color-input:              #dbe1e8;
+  --color-ring:               #13b4cf;
 
-  --color-border: hsl(220 32% 88%);
-  --color-input: hsl(220 32% 88%);
-  --color-ring: hsl(231 64% 52%);
+  --color-secondary:          #eaeef2;
+  --color-secondary-foreground: #161c25;
 
-  --color-secondary: hsl(220 38% 92%);
-  --color-secondary-foreground: hsl(224 65% 16%);
+  --color-accent:             #eaeef2;
+  --color-accent-foreground:  #161c25;
 
-  --color-accent: hsl(220 38% 92%);
-  --color-accent-foreground: hsl(224 65% 16%);
+  --color-destructive:        #e23b3b;
+  --color-destructive-foreground: #ffffff;
 
-  --color-destructive: hsl(0 84% 58%);
-  --color-destructive-foreground: hsl(0 0% 100%);
+  --color-card:               #ffffff;
+  --color-card-foreground:    #161c25;
 
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(224 65% 16%);
+  --color-popover:            #ffffff;
+  --color-popover-foreground: #161c25;
 
-  /* Sidebar */
-  --color-sidebar: hsl(224 58% 8%);
-  --color-sidebar-foreground: hsl(210 40% 95%);
-  --color-sidebar-muted: hsl(219 22% 44%);
-  --color-sidebar-accent: hsl(231 75% 68%);
-  --color-sidebar-border: hsl(222 48% 13%);
+  /* Sidebar — slightly darker than the white content card */
+  --color-sidebar:            #edf0f4;
+  --color-sidebar-foreground: #252d38;
+  --color-sidebar-muted:      #6b7888;
+  --color-sidebar-accent:     #0c93ac;
+  --color-sidebar-border:     #dbe1e8;
 }
 
 @layer base {
   * { border-color: var(--color-border); }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+
   h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
     font-weight: 700;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.025em;
   }
 }
 
 @layer utilities {
+  /* ── App shell gradient canvas ───────────────────────────── */
+  .app-canvas {
+    background:
+      radial-gradient(ellipse 80% 60% at 10% 0%,  hsla(191,82%,90%,.5) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 50% at 90% 100%, hsla(270,80%,92%,.35) 0%, transparent 55%),
+      #f4f6f8;
+  }
+
+  /* ── Brand gradient text ─────────────────────────────────── */
+  .g2a-gradient-text {
+    background: linear-gradient(120deg, #13b4cf 0%, #2e7de0 34%, #7b2ff7 66%, #e0218a 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
   /* ── 3-D icon badge ──────────────────────────────────────── */
   .icon-3d {
     display: flex;
@@ -67,8 +90,8 @@
     flex-shrink: 0;
   }
   .icon-3d-blue {
-    background: linear-gradient(145deg, #5B78E8 0%, #2D49C8 100%);
-    box-shadow: 0 4px 14px rgba(56,86,212,.42), 0 1px 3px rgba(0,0,0,.12),
+    background: linear-gradient(145deg, #2fc8e0 0%, #0c7689 100%);
+    box-shadow: 0 4px 14px rgba(19,180,207,.42), 0 1px 3px rgba(0,0,0,.12),
                 inset 0 1px 0 rgba(255,255,255,.22);
   }
   .icon-3d-orange {
@@ -99,16 +122,63 @@
 
   /* ── Gradient text ───────────────────────────────────────── */
   .text-gradient-brand {
-    background: linear-gradient(135deg, #3856D4 0%, #E8941A 100%);
+    background: linear-gradient(120deg, #13b4cf 0%, #2e7de0 34%, #7b2ff7 66%, #e0218a 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .text-gradient-cool {
+    background: linear-gradient(135deg, #13b4cf 0%, #7b2ff7 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  /* ── Glassy card panel ───────────────────────────────────── */
+  /* ── Glassy / frosted surfaces ───────────────────────────── */
   .glass-panel {
-    background: rgba(255,255,255,.7);
-    backdrop-filter: blur(16px);
-    border: 1px solid rgba(255,255,255,.55);
+    background: rgba(255,255,255,.72);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,.60);
+  }
+  .glass-dark {
+    background: rgba(10,16,38,.82);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,.07);
+  }
+
+  /* ── Floating sidebar card ───────────────────────────────── */
+  .sidebar-float {
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06), inset 0 0 0 1px rgba(0,0,0,.05);
+  }
+
+  /* ── Subtle card lift ────────────────────────────────────── */
+  .card-lift {
+    box-shadow: 0 1px 3px rgba(22,28,37,.06), 0 4px 16px rgba(19,180,207,.06);
+    transition: box-shadow 200ms ease, transform 200ms ease;
+  }
+  .card-lift:hover {
+    box-shadow: 0 4px 16px rgba(22,28,37,.08), 0 8px 32px rgba(19,180,207,.10);
+    transform: translateY(-1px);
+  }
+
+  /* ── Squircle icon (like mockup floating badges) ─────────── */
+  .squircle {
+    border-radius: 28%;
+  }
+
+  /* ── Editorial display heading ───────────────────────────── */
+  .heading-display {
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+  }
+  .heading-display-xl {
+    font-family: var(--font-display);
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    line-height: 1.0;
   }
 }

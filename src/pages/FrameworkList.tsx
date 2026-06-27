@@ -94,7 +94,7 @@ export function FrameworkList() {
           </div>
           <div className="rounded-xl border bg-card p-5">
             <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Templates Using Frameworks</p>
-            <p className="text-3xl font-bold text-blue-600 mt-1">{templatesUsingFrameworkCount}</p>
+            <p className="text-3xl font-bold text-primary mt-1">{templatesUsingFrameworkCount}</p>
           </div>
         </div>
 
@@ -142,7 +142,7 @@ export function FrameworkList() {
                         <td className="px-5 py-3.5">
                           <div className="flex flex-wrap gap-1">
                             {visibleTypes.map(qt => (
-                              <span key={qt} className="text-xs bg-blue-50 text-blue-700 rounded-full px-2 py-0.5">
+                              <span key={qt} className="text-xs bg-primary/10 text-primary rounded-full px-2 py-0.5">
                                 {Q_TYPE_LABEL_MAP[qt] ?? qt}
                               </span>
                             ))}

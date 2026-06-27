@@ -3,7 +3,6 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 
 export function AppLayout() {
-  // Default to collapsed on tablet/mobile (< 1024px)
   const [collapsed, setCollapsed] = useState(() => window.innerWidth < 1024);
 
   useEffect(() => {
@@ -15,9 +14,12 @@ export function AppLayout() {
   }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="app-canvas h-screen overflow-hidden p-3 flex gap-3">
+      {/* Floating sidebar */}
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
-      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+
+      {/* Main content area — white card */}
+      <div className="flex flex-1 flex-col min-w-0 overflow-hidden rounded-2xl bg-card shadow-sm ring-1 ring-border/60">
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>

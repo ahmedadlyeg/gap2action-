@@ -8,34 +8,15 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/context/ToastContext';
-import type { AssessmentEvent } from '@/types';
+import type { AssessmentEvent, EventRec, RecConvMessage, RecStatus, Task, TaskEffort } from '@/types';
 import { resultsByEventId } from '@/services/resultsMockData';
 import { buildEventResults } from '@/utils/scoring';
+import { getEventRecommendations, saveEventRecommendations, saveTask as storeSaveTask, getEventTasks } from '@/services/store';
 import { cn } from '@/lib/utils';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type RecStatus = 'AI Draft' | 'Under Review' | 'Approved' | 'Noted' | 'Converted';
-
-interface ConvMessage {
-  id: string;
-  role: 'assessor' | 'ai';
-  text: string;
-}
-
-interface Rec {
-  id: string;
-  sectionName: string;
-  gapMagnitude: number; // negative number, e.g. -1.2
-  status: RecStatus;
-  currentText: string;
-  originalText: string;
-  conversation: ConvMessage[];
-}
 
 // ─── Mock recommendation data ─────────────────────────────────────────────────
 
-const INITIAL_RECS: Rec[] = [
+const INITIAL_RECS: Omit<EventRec, 'eventId'>[] = [
   {
     id: 'r1',
     sectionName: 'Technology & Data',
@@ -172,7 +153,7 @@ function TypingDots() {
 
 // ─── Conversation message ─────────────────────────────────────────────────────
 
-function ChatBubble({ msg }: { msg: ConvMessage }) {
+function ChatBubble({ msg }: { msg: RecConvMessage }) {
   const isAI = msg.role === 'ai';
   return (
     <div className={cn('flex gap-2.5', isAI ? '' : 'flex-row-reverse')}>
@@ -203,12 +184,13 @@ const NUDGE_CHIPS = [
 ] as const;
 
 interface RecCardProps {
-  rec: Rec;
-  onUpdate: (id: string, changes: Partial<Rec>) => void;
+  rec: EventRec;
+  eventId: string;
+  onUpdate: (id: string, changes: Partial<EventRec>) => void;
   onNavigateRoadmap?: (recName?: string) => void;
 }
 
-function RecCard({ rec, onUpdate, onNavigateRoadmap }: RecCardProps) {
+function RecCard({ rec, eventId, onUpdate, onNavigateRoadmap }: RecCardProps) {
   const { toast } = useToast();
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
@@ -236,7 +218,7 @@ function RecCard({ rec, onUpdate, onNavigateRoadmap }: RecCardProps) {
   function sendMessage(text: string) {
     if (!text.trim()) return;
 
-    const assessorMsg: ConvMessage = { id: `m${Date.now()}`, role: 'assessor', text: text.trim() };
+    const assessorMsg: RecConvMessage = { id: `m${Date.now()}`, role: 'assessor', text: text.trim() };
     const newConv = [...rec.conversation, assessorMsg];
     onUpdate(rec.id, {
       conversation: newConv,
@@ -247,7 +229,7 @@ function RecCard({ rec, onUpdate, onNavigateRoadmap }: RecCardProps) {
 
     setTimeout(() => {
       const { revised, aiReply } = getMockRevision(rec.id, text.trim());
-      const aiMsg: ConvMessage = { id: `m${Date.now() + 1}`, role: 'ai', text: aiReply };
+      const aiMsg: RecConvMessage = { id: `m${Date.now() + 1}`, role: 'ai', text: aiReply };
       onUpdate(rec.id, {
         conversation: [...newConv, aiMsg],
         currentText: revised,
@@ -284,9 +266,55 @@ function RecCard({ rec, onUpdate, onNavigateRoadmap }: RecCardProps) {
   }
 
   function convertToTasks() {
+    // Don't create duplicates if tasks already exist for this rec
+    const existing = getEventTasks(eventId).filter(t => t.recName === rec.sectionName);
+    if (existing.length > 0) {
+      onUpdate(rec.id, { status: 'Converted' });
+      toast({ title: 'Tasks already exist in Roadmap', description: 'Switching to Roadmap tab…', variant: 'default' });
+      onNavigateRoadmap?.();
+      return;
+    }
+
+    const recId = `rec-${rec.id}`;
+    const today = new Date().toISOString().slice(0, 10);
+    const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
+    const taskTitles: Array<{ title: string; effort: TaskEffort }> = [
+      { title: `Define improvement targets: ${rec.sectionName}`, effort: 'Small' },
+      { title: `Develop action plan: ${rec.sectionName}`, effort: 'Medium' },
+      { title: `Assign workstream lead: ${rec.sectionName}`, effort: 'Small' },
+      { title: `Execute improvements: ${rec.sectionName}`, effort: 'Large' },
+      { title: `Review and validate progress: ${rec.sectionName}`, effort: 'Medium' },
+    ];
+
+    const newTasks: Task[] = taskTitles.map(item => ({
+      id: `${recId}-${crypto.randomUUID()}`,
+      eventId,
+      title: item.title,
+      description: rec.currentText.slice(0, 200),
+      progressNotes: '',
+      recId,
+      recName: rec.sectionName,
+      gapWeight: Math.abs(rec.gapMagnitude),
+      status: 'Not Started' as const,
+      effort: item.effort,
+      assigneeId: undefined,
+      priority: 'Medium' as const,
+      startDate: today,
+      dueDate,
+      dependsOn: [],
+      completionPct: 0,
+      createdAt: new Date().toISOString(),
+    }));
+
+    newTasks.forEach(t => storeSaveTask(t));
     onUpdate(rec.id, { status: 'Converted' });
-    toast({ title: 'Converting to roadmap tasks', description: 'Opening AI task generator…', variant: 'default' });
-    onNavigateRoadmap?.(rec.sectionName);
+    toast({
+      title: `${newTasks.length} tasks added to Roadmap`,
+      description: `Tasks created for "${rec.sectionName}". Switching to Roadmap…`,
+      variant: 'success',
+    });
+    onNavigateRoadmap?.();
   }
 
   return (
@@ -550,7 +578,7 @@ function RecCard({ rec, onUpdate, onNavigateRoadmap }: RecCardProps) {
 
 // ─── Status summary bar ───────────────────────────────────────────────────────
 
-function SummaryBar({ recs }: { recs: Rec[] }) {
+function SummaryBar({ recs }: { recs: EventRec[] }) {
   const counts: Record<RecStatus, number> = {
     'Approved': 0, 'Under Review': 0, 'AI Draft': 0, 'Noted': 0, 'Converted': 0,
   };
@@ -589,10 +617,14 @@ interface RecommendationsTabProps {
 }
 
 export function RecommendationsTab({ event, onNavigateRoadmap }: RecommendationsTabProps) {
-  const [recs, setRecs] = useState<Rec[]>(() => {
-    // Try to seed from real gap data; fall back to hardcoded mock recs for seed events
+  const [recs, setRecs] = useState<EventRec[]>(() => {
+    // 1. Try store first (persisted recs)
+    const stored = getEventRecommendations(event.id);
+    if (stored.length > 0) return stored;
+
+    // 2. Build from real gap data
     const data = resultsByEventId[event.id] ?? buildEventResults(event);
-    const baseRecs: Rec[] = data
+    const baseRecs: EventRec[] = data
       ? data.sections
           .filter(s => s.achievedScore < s.targetScore)
           .sort((a, b) => (a.achievedScore - a.targetScore) - (b.achievedScore - b.targetScore))
@@ -606,6 +638,7 @@ export function RecommendationsTab({ event, onNavigateRoadmap }: Recommendations
               + `and define targeted action items with owners and timelines to close the gap within the next assessment cycle.`;
             return {
               id: `gen-${s.id}-${i}`,
+              eventId: event.id,
               sectionName: s.name,
               gapMagnitude: gap,
               status: 'AI Draft' as const,
@@ -614,25 +647,27 @@ export function RecommendationsTab({ event, onNavigateRoadmap }: Recommendations
               conversation: [],
             };
           })
-      : [...INITIAL_RECS];
+      : INITIAL_RECS.map(r => ({ ...r, eventId: event.id }));
 
-    const sorted = baseRecs.length > 0 ? baseRecs : [...INITIAL_RECS];
-    return sorted.sort((a, b) => {
-      if (a.status === 'Approved' && b.status !== 'Approved') return -1;
-      if (b.status === 'Approved' && a.status !== 'Approved') return 1;
-      return a.gapMagnitude - b.gapMagnitude;
-    });
-  });
-
-  function updateRec(id: string, changes: Partial<Rec>) {
-    setRecs(prev => {
-      const updated = prev.map(r => r.id === id ? { ...r, ...changes } : r);
-      // Re-sort: approved first, then by gap magnitude
-      return updated.sort((a, b) => {
+    const sorted = (baseRecs.length > 0 ? baseRecs : INITIAL_RECS.map(r => ({ ...r, eventId: event.id })))
+      .sort((a, b) => {
         if (a.status === 'Approved' && b.status !== 'Approved') return -1;
         if (b.status === 'Approved' && a.status !== 'Approved') return 1;
         return a.gapMagnitude - b.gapMagnitude;
       });
+    return sorted;
+  });
+
+  function updateRec(id: string, changes: Partial<EventRec>) {
+    setRecs(prev => {
+      const updated = prev.map(r => r.id === id ? { ...r, ...changes } : r)
+        .sort((a, b) => {
+          if (a.status === 'Approved' && b.status !== 'Approved') return -1;
+          if (b.status === 'Approved' && a.status !== 'Approved') return 1;
+          return a.gapMagnitude - b.gapMagnitude;
+        });
+      saveEventRecommendations(event.id, updated);
+      return updated;
     });
   }
 
@@ -668,6 +703,7 @@ export function RecommendationsTab({ event, onNavigateRoadmap }: Recommendations
           <RecCard
             key={rec.id}
             rec={rec}
+            eventId={event.id}
             onUpdate={updateRec}
             onNavigateRoadmap={onNavigateRoadmap}
           />

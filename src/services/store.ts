@@ -4,6 +4,7 @@ import type {
   BuilderSection,
   Category,
   Department,
+  EventRec,
   QuestionnaireSubmission,
   RespondentAction,
   Template,
@@ -38,6 +39,7 @@ interface Store {
   departments?: Department[];
   userGroups?: UserGroup[];
   categories?: Category[];
+  recommendations?: Record<string, EventRec[]>;
 }
 
 function buildSeed(): Store {
@@ -559,4 +561,17 @@ export function updateTask(id: string, updates: Partial<import('../types').Task>
 
 export function deleteTask(id: string): void {
   persistTasks(loadTasks().filter(t => t.id !== id));
+}
+
+// ─── Event Recommendations ────────────────────────────────────────────────────
+
+export function getEventRecommendations(eventId: string): EventRec[] {
+  return load().recommendations?.[eventId] ?? [];
+}
+
+export function saveEventRecommendations(eventId: string, recs: EventRec[]): void {
+  const store = load();
+  if (!store.recommendations) store.recommendations = {};
+  store.recommendations[eventId] = recs;
+  persist(store);
 }

@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef, useMemo } from 'react';
 import { Plus, Trash2, Sparkles, Loader2, Check, ChevronDown } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { Button } from '@/components/ui/button';
@@ -32,11 +32,6 @@ interface RecGroup {
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
-const REC_GROUPS: RecGroup[] = [
-  { recId: 'rg1', recName: 'Technology & Data',       gapWeight: 1.2, color: '#8b5cf6' },
-  { recId: 'rg2', recName: 'Architecture Governance', gapWeight: 0.8, color: '#3b82f6' },
-  { recId: 'rg3', recName: 'Data Architecture',       gapWeight: 0.6, color: '#14b8a6' },
-];
 
 const SEED_TASKS: Omit<GanttTask, 'eventId' | 'priority' | 'completionPct' | 'createdAt'>[] = [
   // Technology & Data
@@ -845,6 +840,8 @@ interface RoadmapTabProps {
   onPendingConsumed?: () => void;
 }
 
+const GROUP_COLORS = ['#8b5cf6', '#3b82f6', '#14b8a6', '#f59e0b', '#ef4444', '#10b981', '#f97316'];
+
 export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: RoadmapTabProps) {
   const { toast } = useToast();
   const [tasks, setTasks] = useState<GanttTask[]>(() => {
@@ -854,16 +851,49 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
   const [openTask, setOpenTask]   = useState<GanttTask | null>(null);
   const [aiModal, setAiModal]     = useState<{ recName: string; recId: string; gapWeight: number } | null>(null);
 
+  // Build groups dynamically from stored tasks — no hardcoding
+  const recGroups: RecGroup[] = useMemo(() => {
+    const seen = new Map<string, RecGroup>();
+    tasks.forEach(t => {
+      if (!seen.has(t.recId)) {
+        seen.set(t.recId, {
+          recId: t.recId,
+          recName: t.recName,
+          gapWeight: t.gapWeight,
+          color: GROUP_COLORS[seen.size % GROUP_COLORS.length],
+        });
+      }
+    });
+    return Array.from(seen.values());
+  }, [tasks]);
+
+  // Reload tasks from store when another tab writes new ones
+  useEffect(() => {
+    const handler = () => {
+      setTasks(getEventTasks(event.id));
+    };
+    window.addEventListener('g2a-store-updated', handler);
+    return () => window.removeEventListener('g2a-store-updated', handler);
+  }, [event.id]);
+
   // Auto-open AI modal when arriving from Recommendations
   const consumedRef = useRef(false);
   useEffect(() => {
     if (pendingRecName && !consumedRef.current) {
       consumedRef.current = true;
-      const group = REC_GROUPS.find(g => g.recName === pendingRecName) ?? REC_GROUPS[0];
-      setAiModal({ recName: pendingRecName, recId: group.recId, gapWeight: group.gapWeight });
       onPendingConsumed?.();
+      // Tasks were already created by "Convert to Tasks" — no need to open modal
+      // Only open modal if no tasks exist for this rec name
+      const hasExisting = tasks.some(t => t.recName === pendingRecName);
+      if (!hasExisting) {
+        const group = recGroups.find(g => g.recName === pendingRecName)
+          ?? (recGroups.length > 0 ? recGroups[0] : null);
+        if (group) {
+          setAiModal({ recName: group.recName, recId: group.recId, gapWeight: group.gapWeight });
+        }
+      }
     }
-  }, [pendingRecName, onPendingConsumed]);
+  }, [pendingRecName, onPendingConsumed, tasks, recGroups]);
 
   function saveTask(updated: GanttTask) {
     storeDeleteTask(updated.id); // remove first to ensure clean upsert
@@ -908,8 +938,9 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
             size="sm"
             className="gap-1.5 h-8 text-xs"
             onClick={() => {
-              const g = REC_GROUPS[0];
-              setAiModal({ recName: g.recName, recId: g.recId, gapWeight: g.gapWeight });
+              const g = recGroups[0];
+              if (g) setAiModal({ recName: g.recName, recId: g.recId, gapWeight: g.gapWeight });
+              else toast({ title: 'No gaps found', description: 'Convert recommendations to tasks first to populate gaps.', variant: 'default' });
             }}
           >
             <Sparkles size={13} className="text-primary" />
@@ -921,13 +952,13 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
               className="appearance-none rounded-lg border border-border bg-background pl-3 pr-7 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
               defaultValue=""
               onChange={e => {
-                const g = REC_GROUPS.find(r => r.recId === e.target.value);
+                const g = recGroups.find(r => r.recId === e.target.value);
                 if (g) setAiModal({ recName: g.recName, recId: g.recId, gapWeight: g.gapWeight });
                 e.target.value = '';
               }}
             >
               <option value="" disabled>Select gap…</option>
-              {REC_GROUPS.map(g => <option key={g.recId} value={g.recId}>{g.recName}</option>)}
+              {recGroups.map(g => <option key={g.recId} value={g.recId}>{g.recName}</option>)}
             </select>
             <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
           </div>
@@ -935,7 +966,7 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
       </div>
 
       {/* Readiness gauge */}
-      <ReadinessGauge pct={readinessPct} tasks={tasks} groups={REC_GROUPS} />
+      <ReadinessGauge pct={readinessPct} tasks={tasks} groups={recGroups} />
 
       {/* Gantt legend */}
       <div className="flex items-center gap-5 flex-wrap">
@@ -956,7 +987,7 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
       </div>
 
       {/* Gantt chart */}
-      <GanttChart tasks={tasks} groups={REC_GROUPS} onTaskClick={setOpenTask} />
+      <GanttChart tasks={tasks} groups={recGroups} onTaskClick={setOpenTask} />
 
       {/* Task detail sheet */}
       <TaskDetailSheet

@@ -411,7 +411,7 @@ export function EventCreate() {
                       <span className="font-semibold text-sm text-slate-700">{selectedFramework.name}</span>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5">
+                      <span className="text-xs bg-primary/10 text-primary border border-primary/20 rounded-full px-2 py-0.5">
                         Scoring: {scoringMethodLabel(selectedFramework.scoringMethod)}
                       </span>
                       <span className="text-xs bg-slate-100 text-slate-600 border border-slate-200 rounded-full px-2 py-0.5">
