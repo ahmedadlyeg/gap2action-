@@ -2,56 +2,17 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { Button } from '@/components/ui/button';
-
-// Inline logo mark — three brand-colour tiles
-function LogoMark({ size = 36 }: { size?: number }) {
-  return (
-    <div className="flex items-end gap-[4px]" style={{ height: size }}>
-      <div
-        className="flex items-center justify-center rounded-[8px] text-white font-black"
-        style={{
-          width: size, height: size, fontSize: size * 0.5,
-          background: 'linear-gradient(145deg,#F5B942,#D97810)',
-          boxShadow: '0 6px 18px rgba(232,148,26,.55),inset 0 1px 0 rgba(255,255,255,.22)',
-        }}
-      >G</div>
-      <div
-        className="flex items-center justify-center rounded-[8px] text-white font-black"
-        style={{
-          width: size, height: size, fontSize: size * 0.5,
-          background: 'linear-gradient(145deg,#2fc8e0,#0c7689)',
-          boxShadow: '0 6px 18px rgba(56,86,212,.55),inset 0 1px 0 rgba(255,255,255,.22)',
-        }}
-      >2</div>
-      <div
-        className="flex items-center justify-center rounded-[8px]"
-        style={{
-          width: size, height: size,
-          background: 'linear-gradient(145deg,#5DD49F,#35A478)',
-          boxShadow: '0 6px 18px rgba(77,184,138,.55),inset 0 1px 0 rgba(255,255,255,.22)',
-        }}
-      >
-        <svg viewBox="0 0 16 16" fill="none" style={{ width: size * 0.56, height: size * 0.56 }}>
-          <rect x="1.5" y="9" width="3" height="5.5" rx="0.8" fill="white" opacity=".65" />
-          <rect x="6.5" y="5.5" width="3" height="9" rx="0.8" fill="white" opacity=".82" />
-          <rect x="11.5" y="2" width="3" height="12.5" rx="0.8" fill="white" />
-        </svg>
-      </div>
-    </div>
-  );
-}
 
 export function Login() {
   const navigate = useNavigate();
   const { login, isLoading } = useAuth();
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail]           = useState('');
+  const [password, setPassword]     = useState('');
   const [rememberMe, setRememberMe] = useState(false);
-  const [showPw, setShowPw] = useState(false);
-  const [error, setError] = useState('');
-  const [toast, setToast] = useState('');
+  const [showPw, setShowPw]         = useState(false);
+  const [error, setError]           = useState('');
+  const [toast, setToast]           = useState('');
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -69,41 +30,10 @@ export function Login() {
     setTimeout(() => setToast(''), 4000);
   };
 
+  const BRAND = 'linear-gradient(120deg, #13b4cf 0%, #2e7de0 38%, #7b2ff7 70%, #e0218a 100%)';
+
   return (
-    <div
-      className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
-      style={{ background: 'linear-gradient(145deg, #060D1F 0%, #0D1C3A 55%, #081529 100%)' }}
-    >
-      {/* Decorative blobs */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        {/* Orange glow — top-left */}
-        <div style={{
-          position: 'absolute', top: '-10%', left: '-8%',
-          width: 520, height: 520, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(232,148,26,.18) 0%, transparent 70%)',
-        }} />
-        {/* Blue glow — bottom-right */}
-        <div style={{
-          position: 'absolute', bottom: '-12%', right: '-8%',
-          width: 600, height: 600, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(56,86,212,.2) 0%, transparent 70%)',
-        }} />
-        {/* Green glow — top-right */}
-        <div style={{
-          position: 'absolute', top: '10%', right: '5%',
-          width: 320, height: 320, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(77,184,138,.12) 0%, transparent 70%)',
-        }} />
-        {/* Subtle grid overlay */}
-        <svg className="absolute inset-0 h-full w-full opacity-[0.03]" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="white" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-        </svg>
-      </div>
+    <div className="min-h-screen flex" style={{ background: '#f4f6f8' }}>
 
       {/* Toast */}
       {toast && (
@@ -113,44 +43,103 @@ export function Login() {
         </div>
       )}
 
-      <div className="relative z-10 w-full max-w-[420px]">
-        {/* Brand header */}
-        <div className="mb-10 flex flex-col items-center text-center">
-          <LogoMark size={40} />
-          <h1 className="mt-5 text-3xl font-extrabold text-white tracking-tight">Gap2Action</h1>
-          <p className="mt-1.5 text-sm tracking-[0.12em] uppercase font-medium"
-             style={{ color: 'rgba(255,255,255,.38)' }}>
-            Assess · Understand · Advance
+      {/* ── Left hero panel ── */}
+      <div
+        className="hidden lg:flex flex-col justify-between"
+        style={{
+          width: 440,
+          minHeight: '100vh',
+          flexShrink: 0,
+          background: BRAND,
+          padding: '48px 44px',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Subtle noise overlay */}
+        <div style={{
+          position: 'absolute', inset: 0, opacity: .06,
+          backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
+          backgroundSize: '180px',
+        }} />
+
+        {/* Logo */}
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 10,
+              background: 'rgba(255,255,255,.95)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <div style={{ width: 18, height: 18, borderRadius: 5, background: BRAND }} />
+            </div>
+            <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: 20, letterSpacing: '-.02em', color: '#fff' }}>
+              Gap2Action
+            </span>
+          </div>
+        </div>
+
+        {/* Centre copy */}
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <div style={{ fontFamily: "'Sora', sans-serif", fontSize: 36, fontWeight: 800, lineHeight: 1.12, letterSpacing: '-.03em', color: '#fff', marginBottom: 16 }}>
+            Assess.<br />Understand.<br />Advance.
+          </div>
+          <p style={{ fontSize: 15, color: 'rgba(255,255,255,.72)', lineHeight: 1.65, maxWidth: 300 }}>
+            Close the gap between where you are and where you need to be — with structured maturity assessments that drive real action.
           </p>
         </div>
 
-        {/* Card */}
-        <div
-          className="rounded-3xl p-8"
-          style={{
-            background: 'rgba(255,255,255,.05)',
-            border: '1px solid rgba(255,255,255,.10)',
-            backdropFilter: 'blur(24px)',
-            boxShadow: '0 24px 64px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.05) inset',
-          }}
-        >
-          <h2 className="text-xl font-bold text-white mb-1">Welcome back</h2>
-          <p className="text-sm mb-7" style={{ color: 'rgba(255,255,255,.45)' }}>
-            Sign in to continue to your workspace
-          </p>
+        {/* Bottom feature pills */}
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[
+            { icon: '📊', text: 'Framework-based maturity assessments' },
+            { icon: '📋', text: 'Actionable recommendations & task tracking' },
+            { icon: '📈', text: 'Progress visibility across the organisation' },
+          ].map(f => (
+            <div key={f.text} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,.14)', borderRadius: 12, padding: '10px 14px', backdropFilter: 'blur(6px)' }}>
+              <span style={{ fontSize: 18 }}>{f.icon}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,.9)' }}>{f.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
+      {/* ── Right form panel ── */}
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div style={{ width: '100%', maxWidth: 420 }}>
+
+          {/* Mobile-only logo */}
+          <div className="lg:hidden flex flex-col items-center mb-10">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 9, background: BRAND, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: 16, height: 16, borderRadius: 4, background: '#fff' }} />
+              </div>
+              <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: 20, letterSpacing: '-.02em', color: '#161c25' }}>Gap2Action</span>
+            </div>
+          </div>
+
+          {/* Heading */}
+          <div style={{ marginBottom: 32 }}>
+            <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: 28, fontWeight: 800, letterSpacing: '-.025em', color: '#161c25', marginBottom: 6 }}>
+              Welcome back
+            </h1>
+            <p style={{ fontSize: 14, color: '#6b7888' }}>Sign in to continue to your workspace</p>
+          </div>
+
+          {/* Error */}
           {error && (
-            <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-red-400/25 bg-red-400/10 px-4 py-3 text-sm text-red-300">
+            <div className="mb-5 flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm"
+              style={{ background: '#fff1f1', border: '1px solid #fca5a5', color: '#b91c1c' }}>
               <AlertCircle size={15} className="mt-0.5 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
-          <form id="login-form" onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5">
+
             {/* Email */}
-            <div className="space-y-2">
-              <label htmlFor="email" className="block text-xs font-semibold uppercase tracking-wider"
-                style={{ color: 'rgba(255,255,255,.55)' }}>
+            <div>
+              <label htmlFor="email" style={{ display: 'block', fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#6b7888', marginBottom: 6 }}>
                 Email address
               </label>
               <input
@@ -161,36 +150,32 @@ export function Login() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="you@gap2action.com"
-                className="flex h-11 w-full rounded-xl px-4 py-2 text-sm text-white placeholder:text-white/30 transition-all outline-none"
                 style={{
-                  background: 'rgba(255,255,255,.07)',
-                  border: '1px solid rgba(255,255,255,.12)',
-                  // focus handled via JS-free approach; let browser ring show via outline
+                  width: '100%', height: 44, borderRadius: 12, padding: '0 14px',
+                  fontSize: 14, color: '#161c25', background: '#fff',
+                  border: '1.5px solid #dbe1e8', outline: 'none',
+                  boxSizing: 'border-box', transition: 'border-color .15s',
                 }}
-                onFocus={e => e.currentTarget.style.border = '1px solid rgba(91,120,232,.7)'}
-                onBlur={e => e.currentTarget.style.border = '1px solid rgba(255,255,255,.12)'}
+                onFocus={e => e.currentTarget.style.borderColor = '#13b4cf'}
+                onBlur={e => e.currentTarget.style.borderColor = '#dbe1e8'}
               />
             </div>
 
             {/* Password */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label htmlFor="password" className="block text-xs font-semibold uppercase tracking-wider"
-                  style={{ color: 'rgba(255,255,255,.55)' }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <label htmlFor="password" style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#6b7888' }}>
                   Password
                 </label>
                 <button
                   type="button"
                   onClick={handleForgotPassword}
-                  className="text-xs font-semibold transition-colors"
-                  style={{ color: 'rgba(91,120,232,.85)' }}
-                  onMouseEnter={e => e.currentTarget.style.color = 'rgba(91,120,232,1)'}
-                  onMouseLeave={e => e.currentTarget.style.color = 'rgba(91,120,232,.85)'}
+                  style={{ fontSize: 12, fontWeight: 600, color: '#0c93ac', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                 >
                   Forgot password?
                 </button>
               </div>
-              <div className="relative">
+              <div style={{ position: 'relative' }}>
                 <input
                   id="password"
                   type={showPw ? 'text' : 'password'}
@@ -199,22 +184,20 @@ export function Login() {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="flex h-11 w-full rounded-xl px-4 pr-11 py-2 text-sm text-white placeholder:text-white/30 transition-all outline-none"
                   style={{
-                    background: 'rgba(255,255,255,.07)',
-                    border: '1px solid rgba(255,255,255,.12)',
+                    width: '100%', height: 44, borderRadius: 12, padding: '0 42px 0 14px',
+                    fontSize: 14, color: '#161c25', background: '#fff',
+                    border: '1.5px solid #dbe1e8', outline: 'none',
+                    boxSizing: 'border-box', transition: 'border-color .15s',
                   }}
-                  onFocus={e => e.currentTarget.style.border = '1px solid rgba(91,120,232,.7)'}
-                  onBlur={e => e.currentTarget.style.border = '1px solid rgba(255,255,255,.12)'}
+                  onFocus={e => e.currentTarget.style.borderColor = '#13b4cf'}
+                  onBlur={e => e.currentTarget.style.borderColor = '#dbe1e8'}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPw(p => !p)}
                   aria-label={showPw ? 'Hide password' : 'Show password'}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 transition-colors"
-                  style={{ color: 'rgba(255,255,255,.35)' }}
-                  onMouseEnter={e => e.currentTarget.style.color = 'rgba(255,255,255,.7)'}
-                  onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,.35)'}
+                  style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9aa5b1', display: 'flex' }}
                 >
                   {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -222,7 +205,7 @@ export function Login() {
             </div>
 
             {/* Remember me */}
-            <div className="flex items-center gap-2.5">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <input
                 id="remember"
                 type="checkbox"
@@ -230,34 +213,31 @@ export function Login() {
                 onChange={e => setRememberMe(e.target.checked)}
                 className="h-4 w-4 rounded cursor-pointer accent-[#0c93ac]"
               />
-              <label htmlFor="remember" className="text-sm cursor-pointer select-none"
-                style={{ color: 'rgba(255,255,255,.5)' }}>
+              <label htmlFor="remember" style={{ fontSize: 13, color: '#6b7888', cursor: 'pointer', userSelect: 'none' }}>
                 Keep me signed in
               </label>
             </div>
-          </form>
 
-          {/* Submit */}
-          <div className="mt-7">
+            {/* Submit */}
             <button
               type="submit"
-              form="login-form"
               disabled={isLoading}
-              className="relative flex w-full items-center justify-center gap-2.5 rounded-xl py-3 text-sm font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
               style={{
-                background: 'linear-gradient(120deg, #13b4cf 0%, #2e7de0 38%, #7b2ff7 100%)',
-                boxShadow: '0 6px 22px rgba(56,86,212,.45)',
+                width: '100%', height: 46, borderRadius: 12, border: 'none',
+                background: BRAND,
+                boxShadow: '0 4px 18px rgba(123,47,247,.35)',
+                color: '#fff', fontWeight: 700, fontSize: 15,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                opacity: isLoading ? .7 : 1,
+                transition: 'box-shadow .2s, opacity .2s',
               }}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLElement).style.boxShadow = '0 8px 28px rgba(56,86,212,.6)';
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 22px rgba(56,86,212,.45)';
-              }}
+              onMouseEnter={e => { if (!isLoading) (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 24px rgba(123,47,247,.5)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 4px 18px rgba(123,47,247,.35)'; }}
             >
               {isLoading ? (
                 <>
-                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                   </svg>
@@ -267,37 +247,29 @@ export function Login() {
                 <>Sign in <ArrowRight size={16} /></>
               )}
             </button>
-          </div>
+          </form>
 
           {/* Demo credentials */}
-          <div className="mt-6 rounded-2xl p-4"
-            style={{ background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.07)' }}>
-            <p className="text-[11px] font-bold uppercase tracking-wider mb-2.5"
-              style={{ color: 'rgba(255,255,255,.35)' }}>Demo credentials</p>
-            <div className="space-y-1.5 font-mono text-[11px]" style={{ color: 'rgba(255,255,255,.45)' }}>
-              <div className="flex items-center gap-2">
-                <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
-                  style={{ background: 'rgba(56,86,212,.25)', color: 'rgba(91,120,232,.9)' }}>Admin</span>
-                <span>admin@gap2action.com / password123</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
-                  style={{ background: 'rgba(77,184,138,.2)', color: 'rgba(77,184,138,.9)' }}>Assessor</span>
-                <span>assessor@gap2action.com / password123</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
-                  style={{ background: 'rgba(232,148,26,.2)', color: 'rgba(232,148,26,.9)' }}>Respondent</span>
-                <span>respondent@gap2action.com / password123</span>
-              </div>
+          <div style={{ marginTop: 28, background: '#fff', borderRadius: 14, padding: '16px 18px', border: '1px solid #dbe1e8' }}>
+            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: '#9aa5b1', marginBottom: 10 }}>Demo credentials</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#6b7888' }}>
+              {[
+                { role: 'Admin',      bg: 'rgba(19,180,207,.12)', fg: '#0c7689',  email: 'admin@gap2action.com' },
+                { role: 'Assessor',   bg: 'rgba(77,184,138,.14)', fg: '#0f8a4b',  email: 'assessor@gap2action.com' },
+                { role: 'Respondent', bg: 'rgba(232,148,26,.14)', fg: '#b46a10',  email: 'respondent@gap2action.com' },
+              ].map(c => (
+                <div key={c.role} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ padding: '2px 7px', borderRadius: 6, fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: c.bg, color: c.fg, flexShrink: 0 }}>{c.role}</span>
+                  <span>{c.email} / password123</span>
+                </div>
+              ))}
             </div>
           </div>
-        </div>
 
-        {/* Footer tagline */}
-        <p className="mt-8 text-center text-xs" style={{ color: 'rgba(255,255,255,.22)' }}>
-          © 2026 Gap2Action · All rights reserved
-        </p>
+          <p style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: '#c3cdd7' }}>
+            © 2026 Gap2Action · All rights reserved
+          </p>
+        </div>
       </div>
     </div>
   );
