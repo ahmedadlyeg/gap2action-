@@ -1005,7 +1005,7 @@ export function TemplateBuilder() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'gap2action_import_format.csv';
+    a.download = 'nudj_import_format.csv';
     a.click();
     URL.revokeObjectURL(url);
   };

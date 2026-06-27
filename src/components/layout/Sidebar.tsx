@@ -175,9 +175,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <div className="flex items-center gap-3 min-w-0">
                 <LogoMark size={28} />
                 <div className="min-w-0">
-                  <p className="text-sm font-extrabold text-slate-800 leading-none tracking-wide">Gap2Action</p>
+                  <p className="text-sm font-extrabold text-slate-800 leading-none tracking-wide">نُضٌج Nudj</p>
                   <p className="text-[9px] text-slate-400 leading-none mt-1 tracking-[0.1em] uppercase">
-                    Assess · Understand · Advance
+                    Assess, Comply, Excel
                   </p>
                 </div>
               </div>

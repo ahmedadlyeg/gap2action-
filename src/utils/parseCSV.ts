@@ -214,7 +214,7 @@ export function parseGroupsCSV(text: string): {
 
 export function generateDepartmentsTemplate(): string {
   return [
-    '# Gap2Action — Departments Import CSV',
+    '# نُضٌج Nudj — Departments Import CSV',
     '# Format: one department name per row (after the header)',
     '# Existing departments with the same name will be skipped (or updated if you choose Update mode)',
     'name',
@@ -226,7 +226,7 @@ export function generateDepartmentsTemplate(): string {
 
 export function generateUsersTemplate(): string {
   return [
-    '# Gap2Action — Users Import CSV',
+    '# نُضٌج Nudj — Users Import CSV',
     '# Columns: name, email, role, department, groups, status',
     '# role:       admin | assessor | respondent',
     '# department: must match a department name (will be created if it does not exist)',
@@ -244,7 +244,7 @@ export function generateUsersTemplate(): string {
 
 export function generateGroupsTemplate(): string {
   return [
-    '# Gap2Action — User Groups Import CSV',
+    '# نُضٌج Nudj — User Groups Import CSV',
     '# Columns: name, members (comma-separated emails, wrapped in quotes if more than one)',
     '# If a group already exists: Update mode replaces member list; Skip mode adds new members only',
     '# If a member email does not exist in the system they will be skipped with a warning',

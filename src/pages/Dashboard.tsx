@@ -111,7 +111,7 @@ function HeroBand({
         <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,.95)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: 14, height: 14, borderRadius: 4, background: 'linear-gradient(135deg,#14c4de,#e0218a)' }} />
         </div>
-        <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: 18, letterSpacing: '-.02em', color: '#fff' }}>Gap2Action</span>
+        <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: 18, letterSpacing: '-.02em', color: '#fff' }}>نُضٌج Nudj</span>
         <div style={{ marginLeft: 22, display: 'flex', gap: 20, fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,.72)' }}>
           <span style={{ color: '#fff' }}>Dashboard</span>
           {showTemplates && <span style={{ cursor: 'pointer' }} onClick={() => navigate('/categories')}>Templates</span>}

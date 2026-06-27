@@ -15,42 +15,42 @@ export const departments: Department[] = [
 // ─── Users ────────────────────────────────────────────────────────────────────
 export const users: User[] = [
   {
-    id: 'u1', name: 'Alexandra Mitchell', email: 'admin@gap2action.com',
+    id: 'u1', name: 'Alexandra Mitchell', email: 'admin@nudj.com',
     role: 'admin', status: 'Active', department: 'Enterprise Architecture',
     groupIds: ['g1'], initials: 'AM',
   },
   {
-    id: 'u2', name: 'James Carter', email: 'assessor@gap2action.com',
+    id: 'u2', name: 'James Carter', email: 'assessor@nudj.com',
     role: 'assessor', status: 'Active', department: 'Digital Strategy',
     groupIds: ['g1', 'g2'], initials: 'JC',
   },
   {
-    id: 'u3', name: 'Sarah Chen', email: 'respondent@gap2action.com',
+    id: 'u3', name: 'Sarah Chen', email: 'respondent@nudj.com',
     role: 'respondent', status: 'Active', department: 'IT Operations',
     groupIds: ['g2'], initials: 'SC',
   },
   {
-    id: 'u4', name: 'David Okafor', email: 'david@gap2action.com',
+    id: 'u4', name: 'David Okafor', email: 'david@nudj.com',
     role: 'respondent', status: 'Inactive', department: 'Finance',
     groupIds: [], initials: 'DO',
   },
   {
-    id: 'u5', name: 'Priya Nair', email: 'priya@gap2action.com',
+    id: 'u5', name: 'Priya Nair', email: 'priya@nudj.com',
     role: 'respondent', status: 'Active', department: 'Digital Strategy',
     groupIds: ['g2'], initials: 'PN',
   },
   {
-    id: 'u6', name: 'Marcus Webb', email: 'marcus@gap2action.com',
+    id: 'u6', name: 'Marcus Webb', email: 'marcus@nudj.com',
     role: 'respondent', status: 'Active', department: 'Enterprise Architecture',
     groupIds: ['g1'], initials: 'MW',
   },
   {
-    id: 'u7', name: 'Aisha Patel', email: 'aisha@gap2action.com',
+    id: 'u7', name: 'Aisha Patel', email: 'aisha@nudj.com',
     role: 'respondent', status: 'Active', department: 'Finance',
     groupIds: [], initials: 'AP',
   },
   {
-    id: 'u8', name: 'Carlos Díaz', email: 'carlos@gap2action.com',
+    id: 'u8', name: 'Carlos Díaz', email: 'carlos@nudj.com',
     role: 'respondent', status: 'Active', department: 'Human Resources',
     groupIds: [], initials: 'CD',
   },

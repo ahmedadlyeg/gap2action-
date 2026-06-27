@@ -74,7 +74,7 @@ export function Login() {
               <div style={{ width: 18, height: 18, borderRadius: 5, background: BRAND }} />
             </div>
             <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: 20, letterSpacing: '-.02em', color: '#fff' }}>
-              Gap2Action
+              نُضٌج Nudj
             </span>
           </div>
         </div>
@@ -82,10 +82,10 @@ export function Login() {
         {/* Centre copy */}
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ fontFamily: "'Sora', sans-serif", fontSize: 36, fontWeight: 800, lineHeight: 1.12, letterSpacing: '-.03em', color: '#fff', marginBottom: 16 }}>
-            Assess.<br />Understand.<br />Advance.
+            Assess.<br />Comply.<br />Excel.
           </div>
           <p style={{ fontSize: 15, color: 'rgba(255,255,255,.72)', lineHeight: 1.65, maxWidth: 300 }}>
-            Close the gap between where you are and where you need to be — with structured maturity assessments that drive real action.
+            Elevate your organisation's maturity — with structured assessments, clear compliance mapping, and actionable plans that drive real progress.
           </p>
         </div>
 
@@ -114,7 +114,7 @@ export function Login() {
               <div style={{ width: 32, height: 32, borderRadius: 9, background: BRAND, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ width: 16, height: 16, borderRadius: 4, background: '#fff' }} />
               </div>
-              <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: 20, letterSpacing: '-.02em', color: '#161c25' }}>Gap2Action</span>
+              <span style={{ fontFamily: "'Sora', sans-serif", fontWeight: 800, fontSize: 20, letterSpacing: '-.02em', color: '#161c25' }}>نُضٌج Nudj</span>
             </div>
           </div>
 
@@ -149,7 +149,7 @@ export function Login() {
                 required
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="you@gap2action.com"
+                placeholder="you@nudj.com"
                 style={{
                   width: '100%', height: 44, borderRadius: 12, padding: '0 14px',
                   fontSize: 14, color: '#161c25', background: '#fff',
@@ -254,9 +254,9 @@ export function Login() {
             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: '#9aa5b1', marginBottom: 10 }}>Demo credentials</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#6b7888' }}>
               {[
-                { role: 'Admin',      bg: 'rgba(19,180,207,.12)', fg: '#0c7689',  email: 'admin@gap2action.com' },
-                { role: 'Assessor',   bg: 'rgba(77,184,138,.14)', fg: '#0f8a4b',  email: 'assessor@gap2action.com' },
-                { role: 'Respondent', bg: 'rgba(232,148,26,.14)', fg: '#b46a10',  email: 'respondent@gap2action.com' },
+                { role: 'Admin',      bg: 'rgba(19,180,207,.12)', fg: '#0c7689',  email: 'admin@nudj.com' },
+                { role: 'Assessor',   bg: 'rgba(77,184,138,.14)', fg: '#0f8a4b',  email: 'assessor@nudj.com' },
+                { role: 'Respondent', bg: 'rgba(232,148,26,.14)', fg: '#b46a10',  email: 'respondent@nudj.com' },
               ].map(c => (
                 <div key={c.role} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ padding: '2px 7px', borderRadius: 6, fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: c.bg, color: c.fg, flexShrink: 0 }}>{c.role}</span>
@@ -267,7 +267,7 @@ export function Login() {
           </div>
 
           <p style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: '#c3cdd7' }}>
-            © 2026 Gap2Action · All rights reserved
+            © 2026 نُضٌج Nudj · All rights reserved
           </p>
         </div>
       </div>

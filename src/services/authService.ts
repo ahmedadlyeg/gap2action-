@@ -2,9 +2,9 @@ import type { User } from '@/types';
 import { users } from './mockData';
 
 const CREDENTIALS: Record<string, string> = {
-  'admin@gap2action.com': 'password123',
-  'assessor@gap2action.com': 'password123',
-  'respondent@gap2action.com': 'password123',
+  'admin@nudj.com': 'password123',
+  'assessor@nudj.com': 'password123',
+  'respondent@nudj.com': 'password123',
 };
 
 export interface AuthResult {

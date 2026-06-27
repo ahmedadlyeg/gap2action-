@@ -209,7 +209,7 @@ function csvField(value: string | number): string {
 
 export function exportSectionsToCSV(sections: BuilderSection[]): string {
   const lines: string[] = [
-    '# Gap2Action — Template Import CSV',
+    '# نُضٌج Nudj — Template Import CSV',
     '# Format guide:',
     '#   SECTION      : field_1=name, field_2=description, field_3=weight_percent',
     '#   QUESTION     : field_1=text, field_2=type, field_3=required(yes/no), field_4=guidance_text',
@@ -256,7 +256,7 @@ export function exportSectionsToCSV(sections: BuilderSection[]): string {
 
 export function generateCsvTemplate(): string {
   return [
-    '# Gap2Action — Template Import CSV',
+    '# نُضٌج Nudj — Template Import CSV',
     '# Format guide:',
     '#   SECTION      : field_1=name, field_2=description, field_3=weight_percent',
     '#   QUESTION     : field_1=text, field_2=type, field_3=required(yes/no), field_4=guidance_text',
