@@ -7,7 +7,8 @@ export type RecommendationStatus = 'Draft' | 'Approved' | 'Converted' | 'Rejecte
 export type TaskStatus = 'Not Started' | 'In Progress' | 'Done' | 'Blocked';
 export type Priority = 'High' | 'Medium' | 'Low';
 export type MaturityLevel = 'Initial' | 'Managed' | 'Defined' | 'Quantitatively Managed' | 'Optimizing';
-export type RespondentStatus = 'Not Started' | 'In Progress' | 'Submitted' | 'Validated' | 'Returned' | 'Returned for Revision';
+export type RespondentStatus = 'Not Started' | 'In Progress' | 'Submitted' | 'Validated' | 'Returned' | 'Returned for Revision'
+  | 'Not_Started' | 'In_Progress' | 'Returned_for_Revision';
 
 export interface User {
   id: string;

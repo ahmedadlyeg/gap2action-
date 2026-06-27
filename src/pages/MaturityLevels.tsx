@@ -376,7 +376,7 @@ function Level0({ data, onCategoryClick }: Level0Props) {
               <PolarAngleAxis dataKey="subject" tick={{ fill: '#94A3B8', fontSize: 12 }} />
               <Radar name="Current" dataKey="current" stroke="#2563EB" fill="#2563EB" fillOpacity={0.18} dot={false} />
               <Radar name="Target" dataKey="target" stroke="#CBD5E1" fill="transparent" strokeDasharray="4 2" dot={false} />
-              <Tooltip formatter={(v: number) => v.toFixed(1)} />
+              <Tooltip formatter={((v: number) => v.toFixed(1)) as never} />
               <Legend />
             </RadarChart>
           </ResponsiveContainer>

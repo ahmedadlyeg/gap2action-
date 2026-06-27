@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { resultsByEventId } from '@/services/resultsMockData';
 import { buildEventResults } from '@/utils/scoring';
 import type { SectionResult } from '@/services/resultsMockData';
 import type { AssessmentEvent } from '@/types';
@@ -211,7 +210,7 @@ interface GapsTabProps {
 
 export function GapsTab({ event, onViewRecommendations }: GapsTabProps) {
   const [onTargetOpen, setOnTargetOpen] = useState(false);
-  const data = resultsByEventId[event.id] ?? buildEventResults(event);
+  const data = buildEventResults(event);
   const MAX_SCORE = 5;
 
   if (!data) {

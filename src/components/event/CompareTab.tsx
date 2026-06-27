@@ -1,4 +1,3 @@
-import React from 'react';
 import { TrendingUp, TrendingDown, Minus, CheckCircle2, ArrowRight, CalendarDays, Info } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { comparisonByCurrentEventId } from '@/services/compareMockData';

@@ -6,9 +6,9 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { getEvents, getTemplates, getCategories, getUsers, getSubmissions } from '@/services/store';
+import { getEvents, getTemplates, getCategories } from '@/services/store';
 import type { AssessmentEvent, Template, Category } from '@/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -136,12 +136,10 @@ export function Reports() {
     const events    = getEvents();
     const templates = getTemplates();
     const categories = getCategories();
-    const submissions = getSubmissions();
 
     const built: ReportRow[] = events.map(ev => {
       const tpl = templates.find(t => t.id === ev.templateId);
       const cat = categories.find(c => c.id === tpl?.categoryId);
-      const evSubs = submissions.filter(s => s.eventId === ev.id);
       const respondentCount = ev.respondentProgress.length;
       const submittedCount  = ev.respondentProgress.filter(p =>
         p.status === 'Submitted' || p.status === 'Validated'
@@ -157,7 +155,6 @@ export function Reports() {
 
     const handler = () => {
       const evs2 = getEvents();
-      const subs2 = getSubmissions();
       setRows(evs2.map(ev => {
         const tpl = templates.find(t => t.id === ev.templateId);
         const cat = categories.find(c => c.id === tpl?.categoryId);

@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  CheckCircle2, Clock, AlertCircle, Minus, ChevronDown, ChevronRight,
+  CheckCircle2, Clock, AlertCircle, Minus, ChevronDown,
   Filter, ListChecks, User, CalendarClock, ArrowRight,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { UserAvatar } from '@/components/ui/avatar';
 import { getTasks, getEvents, getUsers, updateTask } from '@/services/store';
@@ -178,7 +177,7 @@ function EventGroup({
                 <div className="shrink-0 flex items-center gap-1.5">
                   {assignee ? (
                     <>
-                      <UserAvatar user={assignee} size="xs" />
+                      <UserAvatar name={assignee.name} initials={assignee.initials ?? assignee.name.split(' ').map((w: string) => w[0]).join('').toUpperCase()} size="xs" />
                       <span className="text-xs text-muted-foreground hidden md:block">{assignee.name.split(' ')[0]}</span>
                     </>
                   ) : (

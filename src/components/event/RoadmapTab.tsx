@@ -33,23 +33,6 @@ interface RecGroup {
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
 
-const SEED_TASKS: Omit<GanttTask, 'eventId' | 'priority' | 'completionPct' | 'createdAt'>[] = [
-  // Technology & Data
-  { id: 't1', title: 'Run application discovery sprint',   recId: 'rg1', recName: 'Technology & Data',       gapWeight: 1.2, status: 'In Progress',  effort: 'Large',  assigneeId: 'u1', startDate: '2026-06-15', dueDate: '2026-07-10', dependsOn: [],     description: 'Two-week sprint to document all production systems.', progressNotes: '60% complete — 4 of 7 business units covered.' },
-  { id: 't2', title: 'Document portfolio inventory',       recId: 'rg1', recName: 'Technology & Data',       gapWeight: 1.2, status: 'Not Started',  effort: 'Medium', assigneeId: 'u3', startDate: '2026-07-05', dueDate: '2026-07-31', dependsOn: ['t1'], description: 'Produce structured inventory with lifecycle status.', progressNotes: '' },
-  { id: 't3', title: 'Assign Portfolio Owner',             recId: 'rg1', recName: 'Technology & Data',       gapWeight: 1.2, status: 'Done',         effort: 'Small',  assigneeId: 'u2', startDate: '2026-06-10', dueDate: '2026-06-25', dependsOn: [],     description: 'Designate Portfolio Owner in the EA team.', progressNotes: 'Completed — Alexandra Mitchell confirmed as Portfolio Owner.' },
-  { id: 't4', title: 'Evaluate TPM tooling',               recId: 'rg1', recName: 'Technology & Data',       gapWeight: 1.2, status: 'Not Started',  effort: 'Medium', assigneeId: 'u1', startDate: '2026-07-20', dueDate: '2026-08-20', dependsOn: ['t2'], description: 'Compare LeanIX vs ServiceNow ITAM against requirements.', progressNotes: '' },
-  // Architecture Governance
-  { id: 't5', title: 'Draft ARB charter',                  recId: 'rg2', recName: 'Architecture Governance', gapWeight: 0.8, status: 'Not Started',  effort: 'Medium', assigneeId: 'u2', startDate: '2026-07-01', dueDate: '2026-07-20', dependsOn: [],     description: 'Write charter covering scope, membership and cadence.', progressNotes: '' },
-  { id: 't6', title: 'Confirm ARB members',                recId: 'rg2', recName: 'Architecture Governance', gapWeight: 0.8, status: 'Not Started',  effort: 'Small',  assigneeId: 'u2', startDate: '2026-07-15', dueDate: '2026-07-28', dependsOn: ['t5'], description: 'Confirm participation from Business, IT, Security leads.', progressNotes: '' },
-  { id: 't7', title: 'Build self-assessment checklist',    recId: 'rg2', recName: 'Architecture Governance', gapWeight: 0.8, status: 'Done',         effort: 'Small',  assigneeId: 'u1', startDate: '2026-06-01', dueDate: '2026-07-08', dependsOn: [],     description: 'Lightweight checklist for changes below ARB threshold.', progressNotes: 'Published in Confluence — communicated to all project leads.' },
-  { id: 't8', title: 'Run inaugural ARB session',          recId: 'rg2', recName: 'Architecture Governance', gapWeight: 0.8, status: 'Not Started',  effort: 'Medium', assigneeId: 'u3', startDate: '2026-08-01', dueDate: '2026-08-15', dependsOn: ['t6'], description: 'First ARB session using a live project as pilot.', progressNotes: '' },
-  // Data Architecture
-  { id: 't9',  title: 'Appoint Data Stewardship Committee', recId: 'rg3', recName: 'Data Architecture', gapWeight: 0.6, status: 'In Progress',  effort: 'Medium', assigneeId: 'u3', startDate: '2026-06-20', dueDate: '2026-07-15', dependsOn: [],      description: 'Establish committee or interim CDO to own data governance.', progressNotes: '3 of 5 domain leads confirmed.' },
-  { id: 't10', title: 'Define enterprise data model',        recId: 'rg3', recName: 'Data Architecture', gapWeight: 0.6, status: 'Not Started',  effort: 'Large',  assigneeId: 'u1', startDate: '2026-07-10', dueDate: '2026-08-15', dependsOn: ['t9'], description: 'Document top 10 business entities with ownership.', progressNotes: '' },
-  { id: 't11', title: 'Evaluate metadata platform',          recId: 'rg3', recName: 'Data Architecture', gapWeight: 0.6, status: 'Not Started',  effort: 'Medium', assigneeId: 'u3', startDate: '2026-07-20', dueDate: '2026-09-01', dependsOn: [],      description: 'Evaluate Collibra vs Alation vs open-source options.', progressNotes: '' },
-  { id: 't12', title: 'Establish data quality KPIs',         recId: 'rg3', recName: 'Data Architecture', gapWeight: 0.6, status: 'Not Started',  effort: 'Small',  assigneeId: 'u1', startDate: '2026-08-15', dueDate: '2026-09-15', dependsOn: ['t10'], description: 'Define KPIs and quarterly reporting cadence for exec review.', progressNotes: '' },
-];
 
 // AI-suggested tasks per recommendation name
 const AI_SUGGESTIONS: Record<string, Array<{ title: string; effort: Effort }>> = {

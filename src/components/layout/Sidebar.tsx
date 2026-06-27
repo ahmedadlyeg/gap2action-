@@ -3,9 +3,9 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useDirtyState } from '@/context/DirtyStateContext';
 import {
   LayoutDashboard, FolderOpen, Users, BarChart2,
-  ChevronDown, ChevronRight, LogOut, CalendarDays,
+  ChevronDown, ChevronRight, LogOut,
   Building2, Zap, LayoutTemplate, PanelLeftClose, PanelLeftOpen,
-  TrendingUp, LayoutGrid, ListChecks, CheckSquare, FileText, Settings2,
+  TrendingUp, LayoutGrid, ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -13,8 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useAuth } from '@/context/AuthContext';
-import { categories } from '@/services/mockData';
-import { getTemplates } from '@/services/store';
+import { getTemplates, getCategories } from '@/services/store';
 
 const categoryIcons: Record<string, React.ElementType> = {
   'building-2': Building2,
@@ -142,10 +141,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { requestNavigation } = useDirtyState();
   const [expandedCats, setExpandedCats] = useState<string[]>(['cat1']);
   const [templates, setTemplates] = useState(() => getTemplates());
+  const [categories, setCategories] = useState(() => getCategories());
 
-  // Re-read templates whenever anything writes to the store
+  // Re-read templates + categories whenever anything writes to the store
   useEffect(() => {
-    const handler = () => setTemplates(getTemplates());
+    const handler = () => {
+      setTemplates(getTemplates());
+      setCategories(getCategories());
+    };
     window.addEventListener('g2a-store-updated', handler);
     return () => window.removeEventListener('g2a-store-updated', handler);
   }, []);
@@ -207,7 +210,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             <>
               <NavItem to="/" icon={LayoutDashboard} label="Home" collapsed={collapsed} />
               <NavItem to="/maturity" icon={TrendingUp} label="Maturity Levels" collapsed={collapsed} />
-              <NavItem to="/" icon={CalendarDays} label="My Events" collapsed={collapsed} end={false} />
               <NavItem to="/tasks" icon={ListChecks} label="All Tasks" collapsed={collapsed} />
               <SectionLabel label="Tools" collapsed={collapsed} />
               <NavItem to="/categories" icon={FolderOpen} label="All Categories" collapsed={collapsed} />
@@ -326,7 +328,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               })}
 
               <SectionLabel label="Administration" collapsed={collapsed} />
-              <NavItem to="/admin/frameworks" icon={LayoutGrid} label="Assessment Frameworks" collapsed={collapsed} />
+              <NavItem to="/frameworks" icon={LayoutGrid} label="Assessment Frameworks" collapsed={collapsed} />
               <NavItem to="/categories" icon={FolderOpen} label="Manage Categories" collapsed={collapsed} />
               <NavItem to="/users" icon={Users} label="User Management" collapsed={collapsed} />
             </>

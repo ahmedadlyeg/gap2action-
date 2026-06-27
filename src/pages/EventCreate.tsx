@@ -1,25 +1,22 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
-import { ArrowLeft, Users, Search, X, Check, Send, UserCheck, AlertCircle, LayoutGrid, Rocket } from 'lucide-react';
+import { ArrowLeft, Users, Search, X, Check, Send, LayoutGrid, Rocket } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { UserAvatar } from '@/components/ui/avatar';
+
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter,
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
-import {
-  users, departments, userGroups,
-} from '@/services/mockData';
-import { saveEvent, getTemplates, getTemplateSections, getTemplate, getFramework } from '@/services/store';
+import { eventsApi, templatesApi, usersApi, type ApiTemplate, type ApiUser, type ApiGroup, type ApiDepartment } from '@/services/api';
 import { scoringMethodLabel } from './FrameworkList';
-import type { AssessmentEvent, MaturityLevel, EventStatus, BuilderSection } from '@/types';
+import type { MaturityLevel } from '@/types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -27,7 +24,6 @@ const MATURITY_LEVELS: MaturityLevel[] = [
   'Initial', 'Managed', 'Defined', 'Quantitatively Managed', 'Optimizing',
 ];
 
-const activeUsers = users.filter(u => u.status === 'Active');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,9 +71,29 @@ function CheckItem({
 
 export function EventCreate() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  useAuth(); // ensure auth context is available
   const [searchParams] = useSearchParams();
   const preselectedTemplateId = searchParams.get('templateId') ?? '';
+
+  // API data
+  const [allTemplates, setAllTemplates] = useState<ApiTemplate[]>([]);
+  const [activeUsers, setActiveUsers] = useState<ApiUser[]>([]);
+  const [departments, setDepartments] = useState<ApiDepartment[]>([]);
+  const [userGroups, setUserGroups] = useState<ApiGroup[]>([]);
+
+  useEffect(() => {
+    Promise.all([
+      templatesApi.list(),
+      usersApi.list().catch(() => [] as ApiUser[]),
+      usersApi.departments().catch(() => []),
+      usersApi.groups().catch(() => []),
+    ]).then(([tpls, users, depts, groups]) => {
+      setAllTemplates(tpls.filter(t => t.status === 'Active'));
+      setActiveUsers(users.filter(u => u.status === 'Active'));
+      setDepartments(depts);
+      setUserGroups(groups);
+    });
+  }, []);
 
   const [form, setForm] = useState<EventForm>({
     name: '',
@@ -104,28 +120,29 @@ export function EventCreate() {
   const [useSectionAssignment, setUseSectionAssignment] = useState(false);
   const [sectionAssignments, setSectionAssignments] = useState<Record<string, Set<string>>>({});
 
-  // Active templates for picker — deduplicated by family (highest version per root)
+  // Active templates for picker — deduplicated by version family
   const activeTemplatesForPicker = useMemo(() => {
-    const allActive = getTemplates().filter(t => t.status === 'Active');
-    allActive.sort((a, b) => {
+    const sorted = [...allTemplates].sort((a, b) => {
       const [aMaj = 0, aMin = 0] = a.version.split('.').map(Number);
       const [bMaj = 0, bMin = 0] = b.version.split('.').map(Number);
       return aMaj !== bMaj ? bMaj - aMaj : bMin - aMin;
     });
     const seen = new Set<string>();
-    return allActive.filter(t => {
-      const root = t.parentVersionId ?? t.id;
+    return sorted.filter(t => {
+      const root = (t as unknown as { parentVersionId?: string }).parentVersionId ?? t.id;
       if (seen.has(root)) return false;
       seen.add(root);
       return true;
     });
-  }, []);
+  }, [allTemplates]);
 
-  // Template sections — loaded from store whenever templateId changes
-  const templateSections = useMemo<BuilderSection[]>(() => {
-    if (!form.templateId) return [];
-    return getTemplateSections(form.templateId) ?? [];
+  // Template sections — from the selected template's sections array (loaded with template)
+  const [selectedTemplateData, setSelectedTemplateData] = useState<ApiTemplate | undefined>();
+  useEffect(() => {
+    if (!form.templateId) { setSelectedTemplateData(undefined); return; }
+    templatesApi.get(form.templateId).then(setSelectedTemplateData).catch(() => {});
   }, [form.templateId]);
+  const templateSections = selectedTemplateData?.sections ?? [];
 
   // Section validation — every section needs >= 1 assigned respondent (only when toggle ON)
   const sectionValidationError = useSectionAssignment &&
@@ -150,7 +167,7 @@ export function EventCreate() {
     const ids = new Set<string>();
     directIds.forEach(id => ids.add(id));
     userGroups.filter(g => groupIds.has(g.id)).forEach(g => g.memberIds.forEach(id => ids.add(id)));
-    activeUsers.filter(u => u.department && deptIds.has(u.department)).forEach(u => ids.add(u.id));
+    activeUsers.filter(u => u.departmentId && deptIds.has(u.departmentId)).forEach(u => ids.add(u.id));
     excludedIds.forEach(id => ids.delete(id));
     return Array.from(ids);
   }, [directIds, groupIds, deptIds, excludedIds]);
@@ -160,7 +177,7 @@ export function EventCreate() {
   // Filtered lists per tab
   const filteredUsers = activeUsers.filter(u =>
     u.name.toLowerCase().includes(search.toLowerCase()) ||
-    (u.department ?? '').toLowerCase().includes(search.toLowerCase())
+    u.email.toLowerCase().includes(search.toLowerCase())
   );
   const filteredGroups = userGroups.filter(g =>
     g.name.toLowerCase().includes(search.toLowerCase())
@@ -188,11 +205,10 @@ export function EventCreate() {
     }
   };
 
-  const toggleDept = (name: string, checked: boolean) => {
-    setDeptIds(prev => { const s = new Set(prev); if (checked) s.add(name); else s.delete(name); return s; });
+  const toggleDept = (deptId: string, checked: boolean) => {
+    setDeptIds(prev => { const s = new Set(prev); if (checked) s.add(deptId); else s.delete(deptId); return s; });
     if (!checked) {
-      // When deselecting a dept, remove its members from exclusions so re-adding works cleanly
-      const memberIds = activeUsers.filter(u => u.department === name).map(u => u.id);
+      const memberIds = activeUsers.filter(u => u.departmentId === deptId).map(u => u.id);
       setExcludedIds(prev => {
         const s = new Set(prev);
         memberIds.forEach(id => s.delete(id));
@@ -229,14 +245,6 @@ export function EventCreate() {
     setSectionAssignments(prev => ({ ...prev, [sectionId]: new Set<string>() }));
   };
 
-  const removeResolved = (uid: string) => {
-    if (directIds.has(uid)) {
-      setDirectIds(prev => { const s = new Set(prev); s.delete(uid); return s; });
-    } else {
-      // Came from a group or dept — add to exclusion list
-      setExcludedIds(prev => new Set([...prev, uid]));
-    }
-  };
 
   const validate = (): boolean => {
     const errs: Partial<Record<keyof EventForm, string>> = {};
@@ -252,37 +260,26 @@ export function EventCreate() {
     return true;
   };
 
-  const handleSaveDraft = () => {
+  const buildPayload = (status: 'Draft' | 'Open') => ({
+    name: form.name.trim(),
+    description: form.description.trim(),
+    templateId: form.templateId,
+    status,
+    startDate: form.startDate || undefined,
+    endDate: form.endDate || undefined,
+    targetMaturityLevel: form.targetMaturityLevel || undefined,
+    reassessmentDate: form.reassessmentDate || undefined,
+    respondentIds: resolvedIds,
+  });
+
+  const handleSaveDraft = async () => {
     if (!form.name.trim()) { setErrors({ name: 'Event name is required to save as draft.' }); return; }
-    const draft: AssessmentEvent = {
-      id: `e_${Date.now()}`,
-      templateId: form.templateId,
-      name: form.name.trim(),
-      description: form.description.trim(),
-      status: 'Draft' as EventStatus,
-      ownerId: user?.id ?? '',
-      startDate: form.startDate,
-      endDate: form.endDate,
-      targetMaturityLevel: form.targetMaturityLevel || undefined,
-      reassessmentDate: form.reassessmentDate || undefined,
-      respondentIds: resolvedIds,
-      sectionAssignments: useSectionAssignment && templateSections.length > 0
-        ? templateSections.map(s => ({
-            sectionId: s.id,
-            respondentIds: Array.from(sectionAssignments[s.id] ?? []),
-          }))
-        : undefined,
-      respondentProgress: resolvedIds.map(uid => ({
-        userId: uid,
-        completionPct: 0,
-        status: 'Not Started' as const,
-      })),
-      completionRate: 0,
-      createdAt: new Date().toISOString(),
-      frameworkId: selectedFramework?.id,
-    };
-    saveEvent(draft);
-    navigate('/');
+    try {
+      const evt = await eventsApi.create(buildPayload('Draft'));
+      navigate(`/events/${evt.id}`);
+    } catch {
+      toast({ title: 'Failed to save draft.', variant: 'error' });
+    }
   };
 
   const handleLaunch = () => {
@@ -290,49 +287,22 @@ export function EventCreate() {
     setConfirmOpen(true);
   };
 
-  const handleConfirmLaunch = () => {
-    const newId = `e_${Date.now()}`;
-    const tpl = activeTemplatesForPicker.find(t => t.id === form.templateId);
-    const newEvent: AssessmentEvent = {
-      id: newId,
-      templateId: form.templateId,
-      name: form.name.trim(),
-      description: form.description.trim(),
-      status: 'Open' as EventStatus,
-      ownerId: user?.id ?? '',
-      startDate: form.startDate,
-      endDate: form.endDate,
-      targetMaturityLevel: form.targetMaturityLevel || undefined,
-      reassessmentDate: form.reassessmentDate || undefined,
-      respondentIds: resolvedIds,
-      sectionAssignments: useSectionAssignment && templateSections.length > 0
-        ? templateSections.map(s => ({
-            sectionId: s.id,
-            respondentIds: Array.from(sectionAssignments[s.id] ?? []),
-          }))
-        : undefined,
-      respondentProgress: resolvedIds.map(uid => ({
-        userId: uid,
-        completionPct: 0,
-        status: 'Not Started' as const,
-      })),
-      completionRate: 0,
-      createdAt: new Date().toISOString(),
-      frameworkId: selectedFramework?.id,
-    };
-    saveEvent(newEvent);
-    setLaunched(true);
-    toast({ title: 'Event launched successfully', description: newEvent.name, variant: 'success' });
-    setTimeout(() => {
-      setConfirmOpen(false);
-      navigate(`/events/${newId}`);
-    }, 1200);
+  const handleConfirmLaunch = async () => {
+    try {
+      const evt = await eventsApi.create(buildPayload('Open'));
+      setLaunched(true);
+      toast({ title: 'Event launched successfully', description: evt.name, variant: 'success' });
+      setTimeout(() => {
+        setConfirmOpen(false);
+        navigate(`/events/${evt.id}`);
+      }, 1200);
+    } catch {
+      toast({ title: 'Failed to launch event.', variant: 'error' });
+    }
   };
 
   const selectedTemplate = activeTemplatesForPicker.find(t => t.id === form.templateId);
-  const selectedTemplateWithFramework = form.templateId ? getTemplate(form.templateId) : undefined;
-  const selectedFramework = selectedTemplateWithFramework?.frameworkId
-    ? getFramework(selectedTemplateWithFramework.frameworkId) : undefined;
+  const selectedFramework = selectedTemplateData?.framework;
 
   return (
     <>
@@ -401,7 +371,7 @@ export function EventCreate() {
                 {errors.templateId && <p className="text-xs text-destructive">{errors.templateId}</p>}
                 {selectedTemplate && (
                   <p className="text-xs text-muted-foreground">
-                    {selectedTemplate.questionCount} questions · {selectedTemplate.assessmentType ?? 'Maturity'} type
+                    {(selectedTemplate.sections ?? []).reduce((n, s) => n + (s.questions?.length ?? 0), 0)} questions · {selectedTemplate.assessmentType ?? 'Maturity'} type
                   </p>
                 )}
                 {selectedFramework && (
@@ -412,15 +382,15 @@ export function EventCreate() {
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs bg-primary/10 text-primary border border-primary/20 rounded-full px-2 py-0.5">
-                        Scoring: {scoringMethodLabel(selectedFramework.scoringMethod)}
+                        Scoring: {scoringMethodLabel((selectedFramework as unknown as { scoringMethod?: string })?.scoringMethod as import('@/types').ScoringMethod ?? 'weighted_section')}
                       </span>
                       <span className="text-xs bg-slate-100 text-slate-600 border border-slate-200 rounded-full px-2 py-0.5">
-                        {selectedFramework.allowedQuestionTypes.length} question types
+                        {((selectedFramework as unknown as { allowedQuestionTypes?: unknown[] })?.allowedQuestionTypes?.length ?? 0)} question types
                       </span>
                     </div>
-                    {selectedFramework.scoringMethod !== 'weighted_section' && (
+                    {(selectedFramework as unknown as { scoringMethod?: string })?.scoringMethod !== 'weighted_section' && (
                       <p className="text-xs text-amber-700">
-                        This framework uses {scoringMethodLabel(selectedFramework.scoringMethod)} scoring. Final scores are calculated at submission time.
+                        This framework uses {scoringMethodLabel((selectedFramework as unknown as { scoringMethod?: string })?.scoringMethod as import('@/types').ScoringMethod ?? 'weighted_section')} scoring. Final scores are calculated at submission time.
                       </p>
                     )}
                   </div>
@@ -551,7 +521,7 @@ export function EventCreate() {
                           key={u.id}
                           id={u.id}
                           label={u.name}
-                          sub={`${u.department ?? '—'} · ${u.role}`}
+                          sub={`${departments.find(d => d.id === u.departmentId)?.name ?? '—'} · ${u.role}`}
                           checked={directIds.has(u.id) || (resolvedIds.includes(u.id) && !directIds.has(u.id))}
                           onChange={checked => toggleUser(u.id, checked)}
                         />
@@ -577,11 +547,11 @@ export function EventCreate() {
                     : filteredDepts.map(d => (
                         <CheckItem
                           key={d.id}
-                          id={d.name}
+                          id={d.id}
                           label={d.name}
-                          sub={`${activeUsers.filter(u => u.department === d.name).length} user${activeUsers.filter(u => u.department === d.name).length !== 1 ? 's' : ''}`}
-                          checked={deptIds.has(d.name)}
-                          onChange={checked => toggleDept(d.name, checked)}
+                          sub={`${activeUsers.filter(u => u.departmentId === d.id).length} user${activeUsers.filter(u => u.departmentId === d.id).length !== 1 ? 's' : ''}`}
+                          checked={deptIds.has(d.id)}
+                          onChange={checked => toggleDept(d.id, checked)}
                         />
                       ))
                 )}

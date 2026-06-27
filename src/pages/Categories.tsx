@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Plus, Pencil, Archive, ArchiveRestore, FolderOpen,
+  Plus, Pencil, Archive, ArchiveRestore, FolderOpen, Trash2,
   Building2, Zap, Shield, BarChart2, Database, Globe, Users, Cpu,
   ChevronDown,
 } from 'lucide-react';
@@ -17,9 +17,15 @@ import {
   SheetTitle, SheetDescription, SheetClose,
 } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { templates as seedTemplates } from '@/services/mockData';
-import { getCategories, saveCategory, updateCategory, getTemplates } from '@/services/store';
-import type { Category, CategoryStatus } from '@/types';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+  DialogDescription, DialogFooter, DialogClose,
+} from '@/components/ui/dialog';
+import { categoriesApi, type ApiCategory } from '@/services/api';
+import type { CategoryStatus } from '@/types';
+
+// Use ApiCategory as our local Category shape
+type Category = ApiCategory;
 
 // ─── Icon registry ────────────────────────────────────────────────────────────
 
@@ -51,7 +57,6 @@ const COLOR_PALETTE = [
   '#D97706', '#0891B2', '#DB2777', '#65A30D',
 ];
 
-function uid() { return `cat${Date.now()}`; }
 
 // ─── Category Sheet ───────────────────────────────────────────────────────────
 
@@ -231,10 +236,11 @@ interface CatCardProps {
   canManage: boolean;
   onEdit: () => void;
   onToggleArchive: () => void;
+  onDelete: () => void;
   onClick: () => void;
 }
 
-function CatCard({ category, templateCount, canManage, onEdit, onToggleArchive, onClick }: CatCardProps) {
+function CatCard({ category, templateCount, canManage, onEdit, onToggleArchive, onDelete, onClick }: CatCardProps) {
   const Icon = ICON_MAP[category.icon] ?? FolderOpen;
   const archived = category.status === 'Archived';
 
@@ -311,6 +317,21 @@ function CatCard({ category, templateCount, canManage, onEdit, onToggleArchive, 
               </TooltipTrigger>
               <TooltipContent>{archived ? 'Restore' : 'Archive'}</TooltipContent>
             </Tooltip>
+            {archived && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
+                    onClick={onDelete}
+                  >
+                    <Trash2 size={13} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Delete permanently</TooltipContent>
+              </Tooltip>
+            )}
           </div>
         )}
       </div>
@@ -325,36 +346,25 @@ export function Categories() {
   const { user } = useAuth();
   const canManage = user?.role === 'admin';
 
-  const [cats, setCats] = useState<Category[]>(() => getCategories());
+  const [cats, setCats] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
 
-  const reload = useCallback(() => {
-    setCats(getCategories());
+  const reload = useCallback(async () => {
+    try {
+      const data = await categoriesApi.list();
+      setCats(data);
+    } catch {
+      // keep existing data on error
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => {
-    window.addEventListener('g2a-store-updated', reload);
-    return () => window.removeEventListener('g2a-store-updated', reload);
-  }, [reload]);
-
-  const templateCountById = useMemo(() => {
-    const allTpls = getTemplates();
-    const map: Record<string, number> = {};
-    allTpls.forEach(t => {
-      if (t.status !== 'Archived') {
-        map[t.categoryId] = (map[t.categoryId] ?? 0) + 1;
-      }
-    });
-    // also count seed templates not in store (shouldn't happen once store is primed)
-    seedTemplates.forEach(t => {
-      if (t.status !== 'Archived' && !allTpls.find(x => x.id === t.id)) {
-        map[t.categoryId] = (map[t.categoryId] ?? 0) + 1;
-      }
-    });
-    return map;
-  }, [cats]); // re-derive when cats changes (store update)
+  useEffect(() => { reload(); }, [reload]);
 
   const visible = useMemo(
     () => cats.filter(c => showArchived || c.status !== 'Archived'),
@@ -366,26 +376,27 @@ export function Categories() {
   const openCreate = () => { setEditing(null); setSheetOpen(true); };
   const openEdit = (cat: Category) => { setEditing(cat); setSheetOpen(true); };
 
-  const handleSave = (data: CatFormData) => {
+  const handleSave = async (data: CatFormData) => {
     if (editing) {
-      updateCategory(editing.id, data);
+      await categoriesApi.update(editing.id, data);
     } else {
-      const newCat: Category = {
-        id: uid(),
-        ...data,
-        templateCount: 0,
-        createdAt: new Date().toISOString(),
-      };
-      saveCategory(newCat);
+      await categoriesApi.create(data);
     }
-    reload();
+    await reload();
     setSheetOpen(false);
   };
 
-  const toggleArchive = (cat: Category) => {
+  const toggleArchive = async (cat: Category) => {
     const newStatus = cat.status === 'Archived' ? 'Active' : 'Archived';
-    updateCategory(cat.id, { status: newStatus as CategoryStatus });
-    reload();
+    await categoriesApi.update(cat.id, { status: newStatus as CategoryStatus });
+    await reload();
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    await categoriesApi.delete(deleteTarget.id);
+    setDeleteTarget(null);
+    await reload();
   };
 
   const handleCardClick = (cat: Category) => {
@@ -425,7 +436,9 @@ export function Categories() {
         )}
 
         {/* Grid */}
-        {visible.length === 0 ? (
+        {loading ? (
+          <div className="py-16 text-center text-sm text-muted-foreground">Loading categories…</div>
+        ) : visible.length === 0 ? (
           <div className="rounded-xl border bg-card py-16 text-center">
             <FolderOpen size={32} className="mx-auto text-muted-foreground mb-3 opacity-40" />
             <p className="text-sm text-muted-foreground">No categories found.</p>
@@ -441,10 +454,11 @@ export function Categories() {
               <CatCard
                 key={cat.id}
                 category={cat}
-                templateCount={templateCountById[cat.id] ?? 0}
+                templateCount={cat.templateCount ?? 0}
                 canManage={canManage}
                 onEdit={() => openEdit(cat)}
                 onToggleArchive={() => toggleArchive(cat)}
+                onDelete={() => setDeleteTarget(cat)}
                 onClick={() => handleCardClick(cat)}
               />
             ))}
@@ -459,6 +473,24 @@ export function Categories() {
         existingNames={existingNames}
         onSave={handleSave}
       />
+      <Dialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete "{deleteTarget?.name}"?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete the category and cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Cancel</Button>
+            </DialogClose>
+            <Button variant="destructive" onClick={confirmDelete}>
+              Delete permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }

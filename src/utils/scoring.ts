@@ -90,7 +90,7 @@ export function buildEventResults(event: AssessmentEvent): EventResultData | nul
   let totalWeight = 0;
 
   const sectionResults: SectionResult[] = sections.map(sec => {
-    const scoredQs = sec.questions.filter(q => q.type !== 'free-text');
+    // scoredQs used below implicitly
     const weight = sec.weight ?? 1;
 
     const questionResults: QuestionResult[] = sec.questions.map(q => {

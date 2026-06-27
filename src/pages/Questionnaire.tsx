@@ -13,9 +13,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogFooter,
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
-import { getEvent, getEvents, getTemplateSections, getSubmission, saveSubmission, updateEvent, getUserAssignedSections, getReturnFeedback, saveRespondentAction, getRespondentAction, getTemplate } from '@/services/store';
+import { getEvent, getTemplateSections, saveSubmission, getReturnFeedback, saveRespondentAction, getRespondentAction } from '@/services/store';
+import { eventsApi, submissionsApi, type ApiEvent } from '@/services/api';
 import { cn } from '@/lib/utils';
-import { scoreAnswer, getMaturityLabel } from '@/utils/scoring';
+import { scoreAnswer } from '@/utils/scoring';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -780,8 +781,7 @@ function SuccessScreen({ eventName, onHome, revisionMode }: { eventName: string;
 
 function buildSections(eventId: string | undefined): QuestionnaireSection[] {
   if (!eventId) return SECTIONS;
-  const allEventsMap = new globalThis.Map(getEvents().map(e => [e.id, e]));
-  const event = allEventsMap.get(eventId);
+  const event = getEvent(eventId);
   if (!event) return SECTIONS;
   const stored = getTemplateSections(event.templateId);
   if (!stored) {
@@ -814,30 +814,76 @@ export function Questionnaire() {
   const { user } = useAuth();
   const isPreview = searchParams.get('mode') === 'preview';
   const userId = user?.id ?? 'u1';
-  const allEventsMap = new globalThis.Map(getEvents().map(e => [e.id, e]));
-  const event = id ? allEventsMap.get(id) : undefined;
 
-  const sections = buildSections(id);
-  const allSectionIds = sections.map(s => s.id);
-  const assignedIds = event
-    ? getUserAssignedSections(event, userId, allSectionIds)
-    : allSectionIds;
-  const visibleSections = sections.filter(s => assignedIds.includes(s.id));
+  // ── API data ──
+  const [apiEvent, setApiEvent] = useState<ApiEvent | null>(null);
+  const [loadingData, setLoadingData] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+    setLoadingData(true);
+    eventsApi.get(id)
+      .then(ev => {
+        setApiEvent(ev);
+        // Pre-load saved answers from API
+        return submissionsApi.get(id, userId).catch(() => null);
+      })
+      .then(sub => {
+        if (sub?.answers) {
+          setAnswers(sub.answers as Record<string, AnswerValue>);
+          setLastSaved(sub.submittedAt ? new Date(sub.submittedAt) : new Date());
+        }
+        // Detect revision mode from submission status
+        if (sub && (sub as unknown as { status?: string }).status === 'Returned_for_Revision') {
+          setIsRevisionMode(true);
+        }
+      })
+      .catch(() => {
+        // Fallback: try store for offline/dev
+        const storeEvent = getEvent(id);
+        if (storeEvent) setApiEvent(storeEvent as unknown as ApiEvent);
+      })
+      .finally(() => setLoadingData(false));
+  }, [id, userId]);
+
+  // Derive sections from API event (template.sections) or store fallback
+  const sections: QuestionnaireSection[] = apiEvent?.template?.sections
+    ? apiEvent.template.sections.map(sec => ({
+        id: sec.id,
+        name: sec.name,
+        description: sec.description,
+        questions: sec.questions.map(q => ({
+          id: q.id,
+          text: q.text,
+          guidance: q.guidance || undefined,
+          type: q.type as QuestionnaireQuestion['type'],
+          required: q.required,
+          options: (q.type === 'single-choice' || q.type === 'multi-choice')
+            ? q.options.map(o => ({ id: o.id, text: o.text }))
+            : undefined,
+          minLabel: q.minLabel || undefined,
+          maxLabel: q.maxLabel || undefined,
+        })),
+      }))
+    : buildSections(id);
+
+  // Section assignment — all visible for now (per-user assignment is a future feature)
+  const visibleSections = sections;
 
   // Template cover data
-  const cover = event ? getTemplate(event.templateId) : undefined;
+  const cover = apiEvent?.template;
   const hasCover = !!(cover?.tagline || cover?.definition || cover?.coverImageUrl || cover?.explanation);
 
   const storageKey = `g2a-questionnaire-${id}`;
 
-  // Revision mode — when assessor has returned this submission for revision
-  const returnFeedback = !isPreview ? getReturnFeedback(id ?? '', userId) : null;
-  const isRevisionMode = returnFeedback !== null;
+  // Revision mode — detected from API submission status or store fallback
+  const storeReturnFeedback = !isPreview ? getReturnFeedback(id ?? '', userId) : null;
+  const [isRevisionMode, setIsRevisionMode] = useState(storeReturnFeedback !== null);
+  const returnFeedback = storeReturnFeedback;
 
   // ── State ──
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>(() => {
-    const saved = getSubmission(id ?? '', userId);
-    if (saved) return saved.answers as Record<string, AnswerValue>;
+    // Start empty — API load fills answers in the useEffect above
     try {
       const raw = localStorage.getItem(storageKey);
       return raw ? (JSON.parse(raw) as Record<string, AnswerValue>) : {};
@@ -846,10 +892,7 @@ export function Questionnaire() {
   const [evidence, setEvidence] = useState<Record<string, EvidenceFile[]>>({});
   const [currentIdx, setCurrentIdx] = useState(() => hasCover ? -1 : 0);
   const [saving, setSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState<Date | null>(() => {
-    const saved = getSubmission(id ?? '', userId);
-    return saved?.submittedAt ? new Date(saved.submittedAt) : null;
-  });
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [, forceTimeUpdate] = useState(0);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -865,39 +908,33 @@ export function Questionnaire() {
   const evidenceKey = `g2a-evidence-${id}-${userId}`;
 
   // Per-framework score calculation
-  const framework = event?.frameworkId ? undefined : undefined; // loaded below if needed
   const calculateScore = (ans: Record<string, AnswerValue>): number => {
     const allQs = visibleSections.flatMap(s => s.questions);
     if (allQs.length === 0) return 0;
-    const scores = allQs.map(q => scoreAnswer(q, ans[q.id] ?? null));
+    const scores = allQs.map(q => scoreAnswer(q as unknown as import('@/types').BuilderQuestion, ans[q.id] ?? null));
     return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
   };
 
   // ── Auto-save every 30s ──
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
+      if (!id) return;
       setSaving(true);
       const current = answersRef.current;
-      const answered = visibleSections.flatMap(s => s.questions).filter(q => isAnswered(q, current)).length;
-      const total = visibleSections.flatMap(s => s.questions.filter(q => q.required)).length;
-      const pct = total > 0 ? Math.round((answered / total) * 100) : 0;
       localStorage.setItem(storageKey, JSON.stringify(current));
-      if (id) {
-        saveSubmission(id, userId, {
-          eventId: id, userId: userId,
-          answers: current, evidence: evidenceRef.current,
-          completionPct: pct, status: 'In Progress',
-        });
-        const liveEvent = getEvent(id);
-        updateEvent(id, {
-          respondentProgress: (liveEvent?.respondentProgress ?? []).map(p =>
-            p.userId === userId
-              ? { ...p, completionPct: pct, status: 'In Progress', lastActivity: new Date().toISOString() }
-              : p
-          ),
-        });
+      try {
+        await submissionsApi.save(id, current);
+        setLastSaved(new Date());
+      } catch {
+        // Fallback: save to store
+        const answered = visibleSections.flatMap(s => s.questions).filter(q => isAnswered(q, current)).length;
+        const total = visibleSections.flatMap(s => s.questions.filter(q => q.required)).length;
+        const pct = total > 0 ? Math.round((answered / total) * 100) : 0;
+        saveSubmission(id, userId, { eventId: id, userId, answers: current, evidence: evidenceRef.current, completionPct: pct, status: 'In Progress' });
+        setLastSaved(new Date());
+      } finally {
+        setSaving(false);
       }
-      setTimeout(() => { setSaving(false); setLastSaved(new Date()); }, 600);
     }, 30000);
     return () => clearInterval(interval);
   }, [storageKey, id, visibleSections]);
@@ -930,53 +967,43 @@ export function Questionnaire() {
     });
   }, [id, userId]);
 
-  const manualSave = () => {
+  const manualSave = async () => {
+    if (!id) return;
     setSaving(true);
-    const answered = visibleSections.flatMap(s => s.questions).filter(q => isAnswered(q, answers)).length;
-    const total = visibleSections.flatMap(s => s.questions.filter(q => q.required)).length;
-    const pct = total > 0 ? Math.round((answered / total) * 100) : 0;
     localStorage.setItem(storageKey, JSON.stringify(answers));
-    if (id) {
-      saveSubmission(id, userId, {
-        eventId: id, userId, answers, completionPct: pct, status: 'In Progress',
-      });
-      const liveEvent = getEvent(id);
-      updateEvent(id, {
-        respondentProgress: (liveEvent?.respondentProgress ?? []).map(p =>
-          p.userId === userId
-            ? { ...p, completionPct: pct, status: 'In Progress', lastActivity: new Date().toISOString() }
-            : p
-        ),
-      });
+    try {
+      await submissionsApi.save(id, answers);
+      setLastSaved(new Date());
+    } catch {
+      const pct = visibleSections.flatMap(s => s.questions.filter(q => q.required)).length > 0
+        ? Math.round(visibleSections.flatMap(s => s.questions).filter(q => isAnswered(q, answers)).length
+            / visibleSections.flatMap(s => s.questions.filter(q => q.required)).length * 100)
+        : 0;
+      saveSubmission(id, userId, { eventId: id, userId, answers, completionPct: pct, status: 'In Progress' });
+      setLastSaved(new Date());
+    } finally {
+      setSaving(false);
     }
-    setTimeout(() => { setSaving(false); setLastSaved(new Date()); }, 600);
   };
 
-  const handleConfirmSubmit = () => {
-    if (id) {
+  const handleConfirmSubmit = async () => {
+    if (!id) return;
+    setSaving(true);
+    try {
+      // First save current answers, then submit
+      await submissionsApi.save(id, answers);
+      await submissionsApi.submit(id);
+      if (isRevisionMode) setRevisionSubmitted(true);
+    } catch {
+      // Fallback: local store submit
       const now = new Date().toISOString();
       const finalScore = calculateScore(answers);
-      const maturity = getMaturityLabel(finalScore);
       saveSubmission(id, userId, {
-        eventId: id, userId: userId,
+        eventId: id, userId,
         answers, evidence: evidenceRef.current,
         completionPct: 100, status: 'Submitted',
-        score: finalScore,
-        submittedAt: now,
+        score: finalScore, submittedAt: now,
       });
-      // Persist score + maturity back to the event for dashboard display
-      const scoreableSubmissions = [finalScore]; // extend if aggregating multiple respondents
-      const avgScore = Math.round(scoreableSubmissions.reduce((s, n) => s + n, 0) / scoreableSubmissions.length);
-      updateEvent(id, { score: avgScore, maturityLevel: maturity as import('@/types').MaturityLevel });
-      const liveEventOnSubmit = getEvent(id);
-      updateEvent(id, {
-        respondentProgress: (liveEventOnSubmit?.respondentProgress ?? []).map(p =>
-          p.userId === userId
-            ? { ...p, completionPct: 100, status: 'Submitted', lastActivity: now }
-            : p
-        ),
-      });
-      // In revision mode: clear the return action so the assessor sees a fresh submission
       if (isRevisionMode) {
         const existingAction = getRespondentAction(id, userId);
         saveRespondentAction(id, userId, {
@@ -986,6 +1013,8 @@ export function Questionnaire() {
         });
         setRevisionSubmitted(true);
       }
+    } finally {
+      setSaving(false);
     }
     localStorage.removeItem(storageKey);
     localStorage.removeItem(evidenceKey);
@@ -994,8 +1023,19 @@ export function Questionnaire() {
   };
 
   // ── Derived ──
+  // event alias — prefer API, fall back to local store (for preview/offline)
+  const event = apiEvent ?? (id ? getEvent(id) : undefined);
+
+  // Show spinner while initial API data loads
+  if (loadingData && !event) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-muted-foreground text-sm animate-pulse">Loading assessment…</div>
+      </div>
+    );
+  }
+
   const currentSection = currentIdx >= 0 ? visibleSections[currentIdx] : undefined;
-  const sectionComplete = currentSection ? currentSection.questions.every(q => isAnswered(q, answers)) : false;
   const allComplete = visibleSections.every(s => s.questions.every(q => isAnswered(q, answers)));
   const isLast = currentIdx === visibleSections.length - 1;
   const isFirst = currentIdx === 0;

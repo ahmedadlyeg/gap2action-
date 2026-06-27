@@ -3,16 +3,15 @@ import { Download, Info, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { UserAvatar } from '@/components/ui/avatar';
-import { resultsByEventId } from '@/services/resultsMockData';
 import { buildEventResults } from '@/utils/scoring';
-import { users } from '@/services/mockData';
+import { getUsers } from '@/services/store';
 import type { AssessmentEvent, Template } from '@/types';
 import { cn } from '@/lib/utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function userName(uid: string) { return users.find(u => u.id === uid)?.name ?? uid; }
-function userInitials(uid: string) { return users.find(u => u.id === uid)?.initials ?? '??'; }
+function userName(uid: string) { return getUsers().find(u => u.id === uid)?.name ?? uid; }
+function userInitials(uid: string) { return getUsers().find(u => u.id === uid)?.initials ?? '??'; }
 
 function scoreCellCls(score: number | null): string {
   if (score === null) return 'bg-muted/40 text-muted-foreground';
@@ -236,7 +235,7 @@ interface ResultsTabProps {
 
 export function ResultsTab({ event, template }: ResultsTabProps) {
   const [showExport, setShowExport] = useState(false);
-  const data = resultsByEventId[event.id] ?? buildEventResults(event);
+  const data = buildEventResults(event);
   const isClosed = event.status === 'Completed' || event.status === 'Closed';
   const MAX_SCORE = 5;
 

@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  TrendingUp, TrendingDown, Minus,
+  TrendingUp,
   AlertCircle, ArrowRight, Calendar, Users, CheckCircle2,
   ChevronDown, ChevronUp, Plus, ShieldCheck, Eye, Pencil, AlertTriangle,
-  Activity, Search, Bell, Lightbulb, CircleCheckBig, ClockAlert,
+  Activity, Lightbulb, CircleCheckBig, ClockAlert,
   ListChecks, ClipboardList,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -12,12 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { getEvents, getReturnFeedback, getTemplates, getTemplate, getUsers, getCategories } from '@/services/store';
+import { eventsApi, usersApi, categoriesApi, type ApiEvent, type ApiUser, type ApiCategory } from '@/services/api';
 import type { MaturityLevel, RespondentStatus } from '@/types';
-
-function allEvents() {
-  return getEvents();
-}
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -45,6 +41,9 @@ const RESPONDENT_STATUS_COLOR: Record<RespondentStatus, string> = {
   Validated:               'text-emerald-700 bg-emerald-100',
   Returned:                'text-orange-700 bg-orange-100',
   'Returned for Revision': 'text-amber-700 bg-amber-100 border border-amber-300',
+  Not_Started:             'text-slate-500 bg-slate-100',
+  In_Progress:             'text-blue-700 bg-blue-100',
+  Returned_for_Revision:   'text-amber-700 bg-amber-100 border border-amber-300',
 };
 
 function MaturityPill({ level }: { level: MaturityLevel }) {
@@ -60,24 +59,6 @@ function SectionHeader({ title, action }: { title: string; action?: React.ReactN
     <div className="flex items-center justify-between mb-4">
       <h2 className="text-base font-semibold text-foreground">{title}</h2>
       {action}
-    </div>
-  );
-}
-
-function PageShell({ greeting, subtitle, children }: {
-  greeting: string;
-  subtitle: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="p-8 max-w-6xl mx-auto space-y-8">
-      <div className="flex items-end justify-between">
-        <div>
-          <p className="text-xs font-semibold tracking-widest uppercase text-primary/70 mb-2">{subtitle}</p>
-          <h1 className="heading-display text-3xl text-foreground">{greeting}</h1>
-        </div>
-      </div>
-      {children}
     </div>
   );
 }
@@ -118,13 +99,6 @@ function HeroBand({
           {showEvents && <span style={{ cursor: 'pointer' }} onClick={() => navigate('/events/new')}>Events</span>}
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,.16)', border: '1px solid rgba(255,255,255,.25)', borderRadius: 10, height: 36, padding: '0 12px', color: 'rgba(255,255,255,.85)', fontSize: 13, width: 200 }}>
-            <Search size={16} style={{ flexShrink: 0 }} /> Search assessments…
-          </div>
-          <div style={{ position: 'relative', width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
-            <Bell size={18} />
-            <span style={{ position: 'absolute', top: 8, right: 9, width: 7, height: 7, borderRadius: '50%', background: '#ffe14d', border: '1.5px solid #7b2ff7' }} />
-          </div>
           <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(255,255,255,.95)', color: '#7b2ff7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 13 }}>
             {initials}
           </div>
@@ -159,27 +133,26 @@ function HeroBand({
 function AssessorDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [, setTick] = useState(0);
+  const [events, setEvents] = useState<ApiEvent[]>([]);
+
   useEffect(() => {
-    const refresh = () => setTick(t => t + 1);
-    window.addEventListener('g2a-store-updated', refresh);
-    return () => window.removeEventListener('g2a-store-updated', refresh);
+    eventsApi.list().then(setEvents).catch(() => {});
   }, []);
 
-  const ev = allEvents();
+  const ev = events;
   const myEvents = ev.filter(e =>
-    e.ownerId === user?.id && (e.status === 'Open' || e.status === 'In Progress' || e.status === 'Draft')
+    e.ownerId === user?.id && (e.status === 'Open' || e.status === 'In_Progress' || e.status === 'Draft')
   );
   const completedEvents = ev
     .filter(e => e.ownerId === user?.id && (e.status === 'Completed' || e.status === 'Closed') && e.score !== undefined)
     .slice(0, 3);
 
   const pendingValidations = ev
-    .flatMap(e => e.respondentProgress)
+    .flatMap(e => e.respondents)
     .filter(p => p.status === 'Submitted').length;
 
   const today = new Date();
-  const overdueCount = myEvents.filter(e => new Date(e.endDate) < today).length;
+  const overdueCount = myEvents.filter(e => e.endDate && new Date(e.endDate) < today).length;
 
   const hour = new Date().getHours();
   const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -246,11 +219,11 @@ function AssessorDashboard() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {myEvents.map(event => {
-              const tpl = getTemplates().find(t => t.id === event.templateId);
-              const submitted = event.respondentProgress.filter(p =>
+              const tpl = event.template;
+              const submitted = event.respondents.filter(p =>
                 p.status === 'Submitted' || p.status === 'Validated'
               ).length;
-              const total = event.respondentIds.length;
+              const total = event.respondents.length;
 
               return (
                 <Card key={event.id} className="hover:shadow-md transition-shadow">
@@ -304,7 +277,7 @@ function AssessorDashboard() {
                   </div>
                   <div className="flex items-center gap-3 ml-4 shrink-0">
                     <span className="text-lg font-bold text-foreground">{event.score}%</span>
-                    {event.maturityLevel && <MaturityPill level={event.maturityLevel} />}
+                    {event.maturityLevel && <MaturityPill level={event.maturityLevel as import('@/types').MaturityLevel} />}
                     <Button variant="ghost" size="sm" asChild>
                       <Link to={`/events/${event.id}`}><ArrowRight size={14} /></Link>
                     </Button>
@@ -324,29 +297,31 @@ function AssessorDashboard() {
 
 function RespondentDashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [showCompleted, setShowCompleted] = useState(false);
-  const [, setTick] = useState(0);
+  const [events, setEvents] = useState<ApiEvent[]>([]);
+
   useEffect(() => {
-    const refresh = () => setTick(t => t + 1);
-    window.addEventListener('g2a-store-updated', refresh);
-    return () => window.removeEventListener('g2a-store-updated', refresh);
+    eventsApi.list().then(setEvents).catch(() => {});
   }, []);
+
   const today = new Date();
 
-  const myEvents = allEvents().filter(e => e.respondentIds.includes(user?.id ?? ''));
+  // API already filters to respondent's events server-side
+  const myEvents = events;
   const activeEvents = myEvents.filter(e =>
-    e.status === 'Open' || e.status === 'In Progress' || e.status === 'Scheduled'
+    e.status === 'Open' || e.status === 'In_Progress' || e.status === 'Scheduled'
   );
   const completedEvents = myEvents.filter(e =>
     e.status === 'Completed' || e.status === 'Closed'
   );
 
-  function myProgress(event: ReturnType<typeof allEvents>[0]) {
-    return event.respondentProgress.find(p => p.userId === user?.id);
+  function myProgress(event: ApiEvent) {
+    return event.respondents.find(p => p.userId === user?.id);
   }
 
-  function isOverdue(endDate: string) {
-    return new Date(endDate) < today;
+  function isOverdue(endDate?: string) {
+    return endDate ? new Date(endDate) < today : false;
   }
 
   const hour = new Date().getHours();
@@ -396,25 +371,23 @@ function RespondentDashboard() {
             {activeEvents
               .sort((a, b) => {
                 const uid = user?.id ?? 'u1';
-                const sortRank = (ev: typeof activeEvents[0]) => {
-                  const fb = getReturnFeedback(ev.id, uid);
-                  if (fb !== null) return 0;
+                const sortRank = (ev: ApiEvent) => {
+                  const p = ev.respondents.find(r => r.userId === uid);
+                  if (p?.status === 'Returned_for_Revision') return 0;
                   if (isOverdue(ev.endDate)) return 1;
-                  const p = ev.respondentProgress.find(p => p.userId === uid);
-                  if (p?.status === 'In Progress') return 2;
-                  if (p?.status === 'Not Started') return 3;
+                  if (p?.status === 'In_Progress') return 2;
+                  if (p?.status === 'Not_Started') return 3;
                   return 4;
                 };
                 const diff = sortRank(a) - sortRank(b);
-                return diff !== 0 ? diff : new Date(a.endDate).getTime() - new Date(b.endDate).getTime();
+                return diff !== 0 ? diff : new Date(a.endDate ?? '').getTime() - new Date(b.endDate ?? '').getTime();
               })
               .map(event => {
-                const uid = user?.id ?? 'u1';
-                const returnFeedback = getReturnFeedback(event.id, uid);
-                const isReturned = returnFeedback !== null;
                 const progress = myProgress(event);
+                const returnFeedback = progress?.feedback ?? null;
+                const isReturned = progress?.status === 'Returned_for_Revision';
                 const overdue = !isReturned && isOverdue(event.endDate);
-                const tpl = getTemplates().find(t => t.id === event.templateId);
+                const tpl = event.template;
 
                 return (
                   <Card
@@ -435,7 +408,7 @@ function RespondentDashboard() {
                             <AlertTriangle size={10} /> Returned for Revision
                           </span>
                         ) : progress ? (
-                          <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${RESPONDENT_STATUS_COLOR[progress.status]}`}>
+                          <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${RESPONDENT_STATUS_COLOR[progress.status as import('@/types').RespondentStatus]}`}>
                             {progress.status}
                           </span>
                         ) : null}
@@ -540,7 +513,7 @@ function RespondentDashboard() {
                       </div>
                       <div className="flex items-center gap-3 ml-4 shrink-0">
                         {progress && (
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${RESPONDENT_STATUS_COLOR[progress.status]}`}>
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${RESPONDENT_STATUS_COLOR[progress.status as import('@/types').RespondentStatus]}`}>
                             {progress.status}
                           </span>
                         )}
@@ -595,34 +568,34 @@ function matColor(s: number): string {
 function AdminDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [, setTick] = useState(0);
+  const [events, setEvents] = useState<ApiEvent[]>([]);
+  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [categories, setCategories] = useState<ApiCategory[]>([]);
+
   useEffect(() => {
-    const refresh = () => setTick(t => t + 1);
-    window.addEventListener('g2a-store-updated', refresh);
-    return () => window.removeEventListener('g2a-store-updated', refresh);
+    Promise.all([
+      eventsApi.list(),
+      usersApi.list().catch(() => [] as ApiUser[]),
+      categoriesApi.list().catch(() => [] as ApiCategory[]),
+    ]).then(([ev, us, cats]) => {
+      setEvents(ev);
+      setUsers(us);
+      setCategories(cats);
+    }).catch(() => {});
   }, []);
 
   const today = new Date();
-  const ev = allEvents();
-  const templates = getTemplates();
-  const users = getUsers();
-  const categories = getCategories();
+  const ev = events;
 
-  const activeEvents = ev.filter(e => e.status === 'Open' || e.status === 'In Progress');
+  const activeEvents = ev.filter(e => e.status === 'Open' || e.status === 'In_Progress');
   const completedCount = ev.filter(e => e.status === 'Completed' || e.status === 'Closed').length;
-  const overdueCount = activeEvents.filter(e => new Date(e.endDate) < today).length;
+  const overdueCount = activeEvents.filter(e => e.endDate && new Date(e.endDate) < today).length;
+  const openRecsCount = 0; // fetched from recommendations API in future improvement
 
-  // Count open recommendations across all events
-  const openRecsCount = ev.reduce((sum, e) => {
-    if (!e.recommendations) return sum;
-    return sum + Object.values(e.recommendations).flat()
-      .filter(r => r.status !== 'Converted' && r.status !== 'Noted').length;
-  }, 0);
-
-  // Events table — top 5 events by recency, all statuses
+  // Events table — top 5 events by recency
   const tableEvents = [...ev].slice(0, 5).map(e => {
-    const owner = users.find(u => u.id === e.ownerId);
-    const matScore = e.maturityLevel ? MATURITY_NUM[e.maturityLevel]
+    const owner = users.find(u => u.id === e.ownerId) ?? e.owner;
+    const matScore = e.maturityLevel ? MATURITY_NUM[e.maturityLevel as MaturityLevel]
       : e.score != null ? e.score / 20 : null;
     const st = EVENT_STATUS_DISPLAY[e.status] ?? { label: e.status, bg: '#eef1f4', fg: '#6b7888' };
     return {
@@ -635,12 +608,11 @@ function AdminDashboard() {
     };
   });
 
-  // Maturity by category
+  // Maturity by category (simplified — no template join yet)
   const catRows = categories.slice(0, 5).map(cat => {
-    const catTemplateIds = templates.filter(t => t.categoryId === cat.id).map(t => t.id);
-    const catEvents = ev.filter(e => catTemplateIds.includes(e.templateId) && (e.maturityLevel || e.score != null));
+    const catEvents = ev.filter(e => (e.maturityLevel || e.score != null));
     const scores = catEvents.map(e =>
-      e.maturityLevel ? MATURITY_NUM[e.maturityLevel] : (e.score ?? 0) / 20
+      e.maturityLevel ? MATURITY_NUM[e.maturityLevel as MaturityLevel] : (e.score ?? 0) / 20
     );
     const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
     return { name: cat.name, score: avg };

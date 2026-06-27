@@ -1,49 +1,44 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import type { User } from '@/types';
-import { login as authLogin } from '@/services/authService';
-
-const SESSION_KEY = 'g2a-auth-session';
+import { login as authLogin, logout as authLogout, getMe } from '@/services/authService';
 
 interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
-  logout: () => void;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function loadSession(): User | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as User) : null;
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(loadSession);
-  const [isLoading, setIsLoading] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+  useEffect(() => {
+    getMe().then(u => {
+      setUser(u);
+      setIsLoading(false);
+    });
+  }, []);
+
+  const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
     try {
       const result = await authLogin(email, password);
       if (result.success && result.user) {
         setUser(result.user);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(result.user));
-        return true;
+        return { success: true };
       }
-      return false;
+      return { success: false, error: result.error };
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    await authLogout();
     setUser(null);
-    localStorage.removeItem(SESSION_KEY);
   }, []);
 
   return (

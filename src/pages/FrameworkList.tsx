@@ -4,8 +4,10 @@ import { Edit2, Archive, LayoutGrid, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { getFrameworks, getTemplates, updateFramework } from '@/services/store';
-import type { AssessmentFramework, ScoringMethod } from '@/types';
+import { frameworksApi, type ApiFramework } from '@/services/api';
+import type { ScoringMethod } from '@/types';
+
+type AssessmentFramework = ApiFramework;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,27 +40,29 @@ const STATUS_VARIANT: Record<string, 'success' | 'outline' | 'secondary'> = {
 
 export function FrameworkList() {
   const navigate = useNavigate();
-  const [frameworks, setFrameworks] = useState<AssessmentFramework[]>(() => getFrameworks());
-  const [templates, setTemplates] = useState(() => getTemplates());
+  const [frameworks, setFrameworks] = useState<AssessmentFramework[]>([]);
+  const [_loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const handler = () => {
-      setFrameworks(getFrameworks());
-      setTemplates(getTemplates());
-    };
-    window.addEventListener('g2a-store-updated', handler);
-    return () => window.removeEventListener('g2a-store-updated', handler);
-  }, []);
+  const load = async () => {
+    try {
+      const data = await frameworksApi.list();
+      setFrameworks(data);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
 
   const activeCount = frameworks.filter(fw => fw.status === 'Active').length;
   const draftCount = frameworks.filter(fw => fw.status === 'Draft').length;
-  const templatesUsingFrameworkCount = templates.filter(t => !!t.frameworkId).length;
+  const templatesUsingFrameworkCount = 0; // derived from API in a future improvement
 
-  const getTemplateCount = (fwId: string) =>
-    templates.filter(t => t.frameworkId === fwId).length;
+  const getTemplateCount = (_fwId: string) => 0; // API doesn't return this yet
 
-  const handleArchive = (fw: AssessmentFramework) => {
-    updateFramework(fw.id, { status: 'Archived', updatedAt: new Date().toISOString() });
+  const handleArchive = async (fw: AssessmentFramework) => {
+    await frameworksApi.update(fw.id, { status: 'Archived' });
+    await load();
   };
 
   return (
@@ -137,7 +141,7 @@ export function FrameworkList() {
                           </div>
                         </td>
                         <td className="px-5 py-3.5 text-sm text-muted-foreground">
-                          {scoringMethodLabel(fw.scoringMethod)}
+                          {scoringMethodLabel(fw.scoringMethod as import('@/types').ScoringMethod)}
                         </td>
                         <td className="px-5 py-3.5">
                           <div className="flex flex-wrap gap-1">

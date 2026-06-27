@@ -12,9 +12,9 @@ import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/context/ToastContext';
-import { getFramework, saveFramework } from '@/services/store';
-import type { AssessmentFramework, QuestionType, ScoringMethod, MaturityLevelConfig } from '@/types';
-import { scoringMethodLabel } from './FrameworkList';
+import { frameworksApi } from '@/services/api';
+import type { QuestionType, ScoringMethod, MaturityLevelConfig } from '@/types';
+
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -332,40 +332,39 @@ export function FrameworkCreate() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const isNew = id === 'new';
-  const existing = !isNew && id ? getFramework(id) : undefined;
+  const isNew = !id || id === 'new';
 
-  const [name, setName] = useState(existing?.name ?? '');
-  const [description, setDescription] = useState(existing?.description ?? '');
-  const [status, setStatus] = useState<'Draft' | 'Active' | 'Archived'>(existing?.status ?? 'Draft');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [status, setStatus] = useState<'Draft' | 'Active' | 'Archived'>('Draft');
   const [allowedTypes, setAllowedTypes] = useState<Set<QuestionType>>(
-    existing
-      ? new Set(existing.allowedQuestionTypes)
-      : new Set(ALL_QUESTION_TYPES.map(x => x.type))
+    new Set(ALL_QUESTION_TYPES.map(x => x.type))
   );
-  const [scoringMethod, setScoringMethod] = useState<ScoringMethod>(
-    existing?.scoringMethod ?? 'weighted_section'
-  );
-  const [levels, setLevels] = useState<MaturityLevelConfig[]>(
-    existing?.maturityLevels ?? buildDefaultLevels(5)
-  );
+  const [scoringMethod, setScoringMethod] = useState<ScoringMethod>('weighted_section');
+  const [levels, setLevels] = useState<MaturityLevelConfig[]>(buildDefaultLevels(5));
   const [previewType, setPreviewType] = useState<QuestionType | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isNew && id) {
-      const fw = getFramework(id);
-      if (fw) {
-        setName(fw.name);
-        setDescription(fw.description);
-        setStatus(fw.status);
-        setAllowedTypes(new Set(fw.allowedQuestionTypes));
-        setScoringMethod(fw.scoringMethod);
-        setLevels(fw.maturityLevels.map(l => ({ ...l })));
-      }
+      frameworksApi.get(id).then(fw => {
+        if (fw) {
+          setName(fw.name);
+          setDescription(fw.description);
+          setStatus(fw.status);
+          setAllowedTypes(new Set(fw.allowedQuestionTypes as QuestionType[]));
+          setScoringMethod(fw.scoringMethod as ScoringMethod);
+          setLevels(fw.maturityLevels.map(l => ({
+            level: l.level,
+            label: l.label,
+            description: l.description,
+            minScore: l.minScore,
+            maxScore: l.maxScore,
+          })));
+        }
+      }).catch(() => {});
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, isNew]);
 
   // ── Question types ──────────────────────────────────────────────────────────
 
@@ -422,25 +421,28 @@ export function FrameworkCreate() {
     return errs.length === 0;
   };
 
-  const handleSave = (overrideStatus?: 'Draft' | 'Active') => {
+  const handleSave = async (overrideStatus?: 'Draft' | 'Active') => {
     if (!validate()) return;
     const finalStatus = overrideStatus ?? status;
-    const now = new Date().toISOString();
-    const fw: AssessmentFramework = {
-      id: isNew ? crypto.randomUUID() : (id!),
+    const payload = {
       name: name.trim(),
       description: description.trim(),
       allowedQuestionTypes: ALL_QUESTION_TYPES.map(x => x.type).filter(t => allowedTypes.has(t)),
       scoringMethod,
       maturityLevels: levels,
       status: finalStatus,
-      createdBy: 'u1',
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
     };
-    saveFramework(fw);
-    toast({ title: 'Framework saved successfully.', variant: 'success' });
-    navigate('/admin/frameworks');
+    try {
+      if (isNew) {
+        await frameworksApi.create(payload as Parameters<typeof frameworksApi.create>[0]);
+      } else {
+        await frameworksApi.update(id!, payload as Parameters<typeof frameworksApi.update>[1]);
+      }
+      toast({ title: 'Framework saved successfully.', variant: 'success' });
+      navigate('/admin/frameworks');
+    } catch {
+      toast({ title: 'Failed to save framework. Please try again.', variant: 'error' });
+    }
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -460,7 +462,7 @@ export function FrameworkCreate() {
             <p className="text-xs text-muted-foreground">
               {isNew
                 ? 'Define scoring method, allowed question types, and maturity levels.'
-                : `Editing: ${existing?.name ?? ''}`}
+                : `Editing: ${name}`}
             </p>
           </div>
         </div>

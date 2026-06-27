@@ -2,28 +2,23 @@ import { Fragment, useState, useMemo, useCallback, useEffect } from 'react';
 import { Link, useParams, useLocation, useNavigate } from 'react-router-dom';
 import {
   Plus, ArrowRight, FileText, Copy, Archive, ArchiveRestore,
-  ChevronDown, Home, CheckCircle2, LayoutGrid,
+  ChevronDown, Home, CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select } from '@/components/ui/select';
-import {
-  Sheet, SheetContent, SheetHeader, SheetBody, SheetFooter,
-  SheetTitle, SheetDescription, SheetClose,
-} from '@/components/ui/sheet';
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter,
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { categories as seedCategories, users } from '@/services/mockData';
-import { getTemplates, saveTemplate, getFrameworks } from '@/services/store';
-import type { Template, TemplateStatus, Category, AssessmentFramework } from '@/types';
+import { templatesApi, categoriesApi, frameworksApi, type ApiTemplate, type ApiCategory, type ApiFramework } from '@/services/api';
+import type { TemplateStatus } from '@/types';
+
+type Template = ApiTemplate & { questionCount?: number };
+type Category = ApiCategory;
+type AssessmentFramework = ApiFramework;
 import { scoringMethodLabel } from './FrameworkList';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -45,7 +40,7 @@ function formatDate(iso: string) {
 }
 
 function userName(id: string) {
-  return users.find(u => u.id === id)?.name ?? id;
+  return id; // users resolved from API in a future improvement
 }
 
 function genCode(name: string, existingCodes: string[]) {
@@ -64,80 +59,8 @@ function compareVersion(a: string, b: string): number {
 
 // ─── Framework Picker Dialog ──────────────────────────────────────────────────
 
-// ─── Template Sheet ───────────────────────────────────────────────────────────
 
-interface TplFormData {
-  name: string;
-  description: string;
-  assessmentType: string;
-  status: TemplateStatus;
-}
 
-const EMPTY_TPL: TplFormData = { name: '', description: '', assessmentType: '', status: 'Draft' };
-
-interface TplSheetProps {
-  open: boolean;
-  onClose: () => void;
-  onSave: (data: TplFormData) => void;
-}
-
-function TplSheet({ open, onClose, onSave }: TplSheetProps) {
-  const [form, setForm] = useState<TplFormData>(EMPTY_TPL);
-  const [nameErr, setNameErr] = useState('');
-
-  const set = <K extends keyof TplFormData>(k: K, v: TplFormData[K]) => {
-    setForm(f => ({ ...f, [k]: v }));
-    if (k === 'name') setNameErr('');
-  };
-
-  const handleSave = () => {
-    if (!form.name.trim()) { setNameErr('Template name is required.'); return; }
-    onSave({ ...form, name: form.name.trim() });
-    setForm(EMPTY_TPL);
-    setNameErr('');
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={v => { if (!v) { onClose(); setForm(EMPTY_TPL); setNameErr(''); } }}>
-      <SheetContent>
-        <SheetHeader>
-          <SheetTitle className="text-base font-semibold">Create Template</SheetTitle>
-          <SheetDescription className="text-xs text-muted-foreground mt-0.5">
-            Add a new assessment template to this category.
-          </SheetDescription>
-        </SheetHeader>
-        <SheetBody className="space-y-5">
-          <div className="space-y-1.5">
-            <Label htmlFor="tpl-name">Template Name <span className="text-destructive">*</span></Label>
-            <Input id="tpl-name" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Cloud Readiness Assessment" />
-            {nameErr && <p className="text-xs text-destructive">{nameErr}</p>}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="tpl-desc">Description</Label>
-            <Textarea id="tpl-desc" value={form.description} onChange={e => set('description', e.target.value)} placeholder="What does this template assess?" rows={3} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="tpl-type">Assessment Type</Label>
-            <Input id="tpl-type" value={form.assessmentType} onChange={e => set('assessmentType', e.target.value)} placeholder="e.g. Maturity, Readiness, Capability…" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="tpl-status">Initial Status</Label>
-            <Select id="tpl-status" value={form.status} onChange={e => set('status', e.target.value as TemplateStatus)}>
-              <option value="Draft">Draft</option>
-              <option value="Active">Active</option>
-            </Select>
-          </div>
-        </SheetBody>
-        <SheetFooter>
-          <SheetClose asChild>
-            <Button variant="outline" size="sm">Cancel</Button>
-          </SheetClose>
-          <Button size="sm" onClick={handleSave}>Create Template</Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-}
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
@@ -148,24 +71,28 @@ export function TemplateList() {
   const { user } = useAuth();
   const canManage = user?.role === 'admin';
 
-  const category: Category | undefined =
-    (location.state as { category?: Category })?.category ??
-    seedCategories.find(c => c.id === id);
-
-  const [templates, setTemplates] = useState<Template[]>(() =>
-    getTemplates().filter(t => t.categoryId === id)
+  const [category, setCategory] = useState<Category | undefined>(
+    (location.state as { category?: Category })?.category
   );
-  const reload = useCallback(() => {
-    setTemplates(getTemplates().filter(t => t.categoryId === (id ?? '')));
-  }, [id]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    window.addEventListener('g2a-store-updated', reload);
-    return () => window.removeEventListener('g2a-store-updated', reload);
-  }, [reload]);
+  const reload = useCallback(async () => {
+    try {
+      const [tpls, cat] = await Promise.all([
+        templatesApi.list(id),
+        category ? Promise.resolve(category) : categoriesApi.get(id ?? '').catch(() => undefined),
+      ]);
+      setTemplates(tpls);
+      if (!category && cat) setCategory(cat);
+    } finally {
+      setLoading(false);
+    }
+  }, [id, category]);
+
+  useEffect(() => { reload(); }, [reload]);
 
   const [showArchived, setShowArchived] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState<Template | null>(null);
   const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(new Set());
@@ -173,7 +100,7 @@ export function TemplateList() {
   // ── Build version families (BFS handles deep chains) ──────────────────────
   const families = useMemo(() => {
     const idSet = new Set(templates.map(t => t.id));
-    const roots = templates.filter(t => !t.parentVersionId || !idSet.has(t.parentVersionId));
+    const roots = templates.filter(t => !(t as Template & { parentVersionId?: string }).parentVersionId || !idSet.has((t as Template & { parentVersionId?: string }).parentVersionId!));
     return roots.map(root => {
       const allVersions: Template[] = [];
       const queue = [root.id];
@@ -185,7 +112,7 @@ export function TemplateList() {
         const t = templates.find(x => x.id === pid);
         if (t) {
           allVersions.push(t);
-          templates.filter(x => x.parentVersionId === pid).forEach(c => queue.push(c.id));
+          templates.filter(x => (x as Template & { parentVersionId?: string }).parentVersionId === pid).forEach(ch => queue.push(ch.id));
         }
       }
       allVersions.sort((a, b) => compareVersion(b.version, a.version));
@@ -212,6 +139,10 @@ export function TemplateList() {
     });
   };
 
+  if (loading) {
+    return <div className="p-8 text-center text-sm text-muted-foreground">Loading templates…</div>;
+  }
+
   if (!category) {
     return (
       <div className="p-8 text-center text-muted-foreground">
@@ -223,80 +154,48 @@ export function TemplateList() {
     );
   }
 
-  const handleCreate = (data: TplFormData) => {
-    const newTpl: Template = {
-      id: `t${Date.now()}`,
-      categoryId: id!,
-      name: data.name,
-      code: genCode(data.name, templates.map(t => t.code)),
-      description: data.description,
-      assessmentType: data.assessmentType || undefined,
-      version: '1.0',
-      status: data.status,
-      questionCount: 0,
-      createdBy: user?.id ?? 'u1',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    saveTemplate(newTpl);
-    reload();
-    setSheetOpen(false);
-  };
 
-  const handlePickerConfirm = (frameworkId: string) => {
-    const now = new Date().toISOString();
-    const newTpl: Template = {
-      id: crypto.randomUUID(),
+  const handlePickerConfirm = async (frameworkId: string) => {
+    const newTpl = await templatesApi.create({
       categoryId: id!,
       name: 'Untitled Template',
       code: genCode('Untitled Template', templates.map(t => t.code)),
       description: '',
       version: '1.0',
       status: 'Draft',
-      questionCount: 0,
-      createdBy: user?.id ?? 'u1',
-      createdAt: now,
-      updatedAt: now,
       frameworkId,
-    };
-    saveTemplate(newTpl);
+    });
     setPickerOpen(false);
     navigate(`/templates/${newTpl.id}/builder`);
   };
 
-  // Clone creates an independent copy (no version relationship)
-  const handleClone = (tpl: Template) => {
-    const clone: Template = {
-      ...tpl,
-      id: `t${Date.now()}`,
+  const handleClone = async (tpl: Template) => {
+    await templatesApi.create({
+      categoryId: id!,
       name: `${tpl.name} (Copy)`,
       code: genCode(`${tpl.name} Copy`, templates.map(t => t.code)),
-      status: 'Draft',
+      description: tpl.description,
+      assessmentType: tpl.assessmentType,
       version: '1.0',
-      parentVersionId: undefined,
-      createdBy: user?.id ?? 'u1',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    saveTemplate(clone);
-    reload();
+      status: 'Draft',
+      frameworkId: tpl.frameworkId,
+    });
+    await reload();
   };
 
-  const handleToggleArchive = (tpl: Template) => {
+  const handleToggleArchive = async (tpl: Template) => {
     if (tpl.status !== 'Archived') {
       setConfirmArchive(tpl);
     } else {
-      const restored = { ...tpl, status: 'Draft' as TemplateStatus, updatedAt: new Date().toISOString() };
-      saveTemplate(restored);
-      reload();
+      await templatesApi.update(tpl.id, { status: 'Draft' as TemplateStatus });
+      await reload();
     }
   };
 
-  const confirmDoArchive = () => {
+  const confirmDoArchive = async () => {
     if (!confirmArchive) return;
-    const updated = { ...confirmArchive, status: 'Archived' as TemplateStatus, updatedAt: new Date().toISOString() };
-    saveTemplate(updated);
-    reload();
+    await templatesApi.update(confirmArchive.id, { status: 'Archived' as TemplateStatus });
+    await reload();
     setConfirmArchive(null);
   };
 
@@ -430,7 +329,7 @@ export function TemplateList() {
                           </td>
                           {/* Created by */}
                           <td className="px-5 py-3.5 text-xs text-muted-foreground hidden lg:table-cell">
-                            {userName(primary.createdBy)}
+                            {userName((primary as unknown as { createdBy?: string }).createdBy ?? '')}
                           </td>
                           {/* Last modified */}
                           <td className="px-5 py-3.5 text-xs text-muted-foreground hidden lg:table-cell">
@@ -593,7 +492,8 @@ function FrameworkPickerDialog({
   onConfirm: (frameworkId: string) => void;
 }) {
   const [selected, setSelected] = useState<string>('');
-  const frameworks = getFrameworks();
+  const [frameworks, setFrameworks] = useState<AssessmentFramework[]>([]);
+  useEffect(() => { frameworksApi.list().then(setFrameworks).catch(() => {}); }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -620,7 +520,7 @@ function FrameworkPickerDialog({
                   <p className="text-sm font-semibold text-foreground">{fw.name}</p>
                   {fw.description && <p className="text-xs text-muted-foreground mt-0.5">{fw.description}</p>}
                   <p className="text-[11px] text-muted-foreground mt-1">
-                    Scoring: {scoringMethodLabel(fw.scoringMethod)} &middot; {fw.maturityLevels.length} maturity levels
+                    Scoring: {scoringMethodLabel(fw.scoringMethod as import('@/types').ScoringMethod)} &middot; {fw.maturityLevels.length} maturity levels
                   </p>
                 </div>
                 {selected === fw.id && <CheckCircle2 size={16} className="text-primary shrink-0" />}

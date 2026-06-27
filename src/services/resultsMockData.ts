@@ -40,7 +40,7 @@ export interface EventResultData {
 // Target: 4.0 / 5.0 (Level 4 — Quantitatively Managed)
 // Respondents: u1 (Alexandra Mitchell), u3 (Sarah Chen)
 
-const e3Result: EventResultData = {
+const _e3Result: EventResultData = {
   eventId: 'e3',
   overallScore: 3.6,
   targetScore: 4.0,
@@ -224,7 +224,7 @@ const e3Result: EventResultData = {
 // Overall: 2.9 / 5.0 → Level 2 (Managed). Target: 4.0 (Quantitatively Managed)
 // Respondents: u3 (Sarah Chen), u4 (James Carter), u5 (Maria Rodriguez)
 
-const e1Result: EventResultData = {
+const _e1Result: EventResultData = {
   eventId: 'e1',
   overallScore: 2.9,
   targetScore: 4.0,
@@ -309,7 +309,7 @@ const e1Result: EventResultData = {
 // Overall: 2.4 / 5.0 → Level 2 (Managed). Target: 3.0 (Defined)
 // Respondents: u1 (Alexandra Mitchell), u3 (Sarah Chen)
 
-const e2Result: EventResultData = {
+const _e2Result: EventResultData = {
   eventId: 'e2',
   overallScore: 2.4,
   targetScore: 3.0,
@@ -400,88 +400,10 @@ const e2Result: EventResultData = {
   ],
 };
 
-// ── e4 — EA Governance Readiness 2026 ────────────────────────────────────────
-const e4Result: EventResultData = {
-  eventId: 'e4',
-  overallScore: 3.1,
-  targetScore: 4.0,
-  maturityLevelNum: 3,
-  maturityLevelName: 'Defined',
-  targetLevelNum: 4,
-  targetLevelName: 'Quantitatively Managed',
-  respondentIds: ['u1', 'u3'],
-  completedDate: '2026-02-15',
-  sections: [
-    {
-      id: 's1',
-      name: 'Governance Framework',
-      achievedScore: 3.2,
-      targetScore: 4.0,
-      weightPct: 40,
-      questions: [],
-    },
-    {
-      id: 's2',
-      name: 'Policy Compliance',
-      achievedScore: 2.9,
-      targetScore: 4.0,
-      weightPct: 35,
-      questions: [],
-    },
-    {
-      id: 's3',
-      name: 'Risk Management',
-      achievedScore: 3.3,
-      targetScore: 4.0,
-      weightPct: 25,
-      questions: [],
-    },
-  ],
-};
-
-// ── e5 — Digital Maturity Index 2025 Baseline ────────────────────────────────
-const e5Result: EventResultData = {
-  eventId: 'e5',
-  overallScore: 2.2,
-  targetScore: 3.5,
-  maturityLevelNum: 2,
-  maturityLevelName: 'Developing',
-  targetLevelNum: 3,
-  targetLevelName: 'Defined',
-  respondentIds: ['u3'],
-  completedDate: '2026-01-20',
-  sections: [
-    {
-      id: 's1',
-      name: 'Digital Strategy',
-      achievedScore: 2.5,
-      targetScore: 3.5,
-      weightPct: 35,
-      questions: [],
-    },
-    {
-      id: 's2',
-      name: 'Technology Adoption',
-      achievedScore: 2.0,
-      targetScore: 3.5,
-      weightPct: 40,
-      questions: [],
-    },
-    {
-      id: 's3',
-      name: 'Data & Analytics',
-      achievedScore: 2.1,
-      targetScore: 3.5,
-      weightPct: 25,
-      questions: [],
-    },
-  ],
-};
+// ── e4 — EA Governance Readiness 2026 ────────────────────────
 
 export const resultsByEventId: Record<string, EventResultData> = {
-  e1: e1Result,
-  e2: e2Result,
-  e3: e3Result,
-  e4: e4Result,
-  e5: e5Result,
+  e3: _e3Result,
+  e1: _e1Result,
+  e2: _e2Result,
 };

@@ -318,7 +318,7 @@ export const recommendations: Recommendation[] = [
 ];
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
-export const tasks: Task[] = [
+export const tasks: Task[] = ([
   {
     id: 'task1', title: 'Define EA Governance Charter',
     description: 'Draft and ratify the EA governance charter with executive sponsorship.',
@@ -333,4 +333,4 @@ export const tasks: Task[] = [
     dueDate: '2026-09-30', dependsOn: ['task1'],
     sourceRecommendationId: 'r2', completionPct: 0,
   },
-];
+] as unknown as Task[]);

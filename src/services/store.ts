@@ -116,24 +116,24 @@ export function getCategory(id: string): Category | undefined {
 export function saveCategory(cat: Category): void {
   const store = load();
   if (!store.categories) store.categories = JSON.parse(JSON.stringify(seedCategories));
-  const idx = store.categories.findIndex(c => c.id === cat.id);
-  if (idx >= 0) store.categories[idx] = cat;
-  else store.categories.push(cat);
+  const idx = store.categories!.findIndex(c => c.id === cat.id);
+  if (idx >= 0) store.categories![idx] = cat;
+  else store.categories!.push(cat);
   persist(store);
 }
 
 export function updateCategory(id: string, updates: Partial<Category>): void {
   const store = load();
   if (!store.categories) store.categories = JSON.parse(JSON.stringify(seedCategories));
-  const idx = store.categories.findIndex(c => c.id === id);
-  if (idx >= 0) store.categories[idx] = { ...store.categories[idx], ...updates };
+  const idx = store.categories!.findIndex(c => c.id === id);
+  if (idx >= 0) store.categories![idx] = { ...store.categories![idx], ...updates };
   persist(store);
 }
 
 export function deleteCategory(id: string): void {
   const store = load();
   if (!store.categories) store.categories = JSON.parse(JSON.stringify(seedCategories));
-  store.categories = store.categories.filter(c => c.id !== id);
+  store.categories = store.categories!.filter(c => c.id !== id);
   persist(store);
 }
 
@@ -158,7 +158,7 @@ export function getTemplateMeta(templateId: string): TemplateMeta | null {
 export function saveTemplateMeta(templateId: string, meta: TemplateMeta): void {
   const store = load();
   if (!store.templateMeta) store.templateMeta = {};
-  store.templateMeta[templateId] = meta;
+  store.templateMeta![templateId] = meta;
   persist(store);
 }
 
@@ -227,13 +227,13 @@ export function getTemplate(id: string): Template | undefined {
 export function updateTemplate(id: string, updates: Partial<Template>): void {
   const store = load();
   if (!store.templates) store.templates = JSON.parse(JSON.stringify(seedTemplates));
-  const idx = store.templates.findIndex(t => t.id === id);
+  const idx = store.templates!.findIndex(t => t.id === id);
   if (idx >= 0) {
-    store.templates[idx] = { ...store.templates[idx], ...updates, updatedAt: new Date().toISOString() };
+    store.templates![idx] = { ...store.templates![idx], ...updates, updatedAt: new Date().toISOString() };
   } else {
     // Template exists only in seed — pull it in so we can persist the update
     const seed = seedTemplates.find(t => t.id === id);
-    if (seed) store.templates.push({ ...seed, ...updates, updatedAt: new Date().toISOString() });
+    if (seed) store.templates!.push({ ...seed, ...updates, updatedAt: new Date().toISOString() });
   }
   persist(store);
 }
@@ -241,16 +241,16 @@ export function updateTemplate(id: string, updates: Partial<Template>): void {
 export function saveTemplate(t: Template): void {
   const store = load();
   if (!store.templates) store.templates = JSON.parse(JSON.stringify(seedTemplates));
-  const idx = store.templates.findIndex(x => x.id === t.id);
-  if (idx >= 0) store.templates[idx] = t;
-  else store.templates.push(t);
+  const idx = store.templates!.findIndex(x => x.id === t.id);
+  if (idx >= 0) store.templates![idx] = t;
+  else store.templates!.push(t);
   persist(store);
 }
 
 export function deleteTemplate(id: string): void {
   const store = load();
   if (!store.templates) store.templates = JSON.parse(JSON.stringify(seedTemplates));
-  store.templates = store.templates.filter(t => t.id !== id);
+  store.templates = store.templates!.filter(t => t.id !== id);
   persist(store);
 }
 
@@ -369,31 +369,31 @@ export function getUser(id: string): User | undefined {
 export function saveUser(user: User): void {
   const store = load();
   if (!store.users) store.users = JSON.parse(JSON.stringify(seedUsers));
-  const idx = store.users.findIndex(u => u.id === user.id);
-  if (idx >= 0) store.users[idx] = user;
-  else store.users.push(user);
+  const idx = store.users!.findIndex(u => u.id === user.id);
+  if (idx >= 0) store.users![idx] = user;
+  else store.users!.push(user);
   persist(store);
 }
 
 export function updateUser(id: string, updates: Partial<User>): void {
   const store = load();
   if (!store.users) store.users = JSON.parse(JSON.stringify(seedUsers));
-  const idx = store.users.findIndex(u => u.id === id);
-  if (idx >= 0) store.users[idx] = { ...store.users[idx], ...updates };
+  const idx = store.users!.findIndex(u => u.id === id);
+  if (idx >= 0) store.users![idx] = { ...store.users![idx], ...updates };
   persist(store);
 }
 
 export function deleteUser(id: string): void {
   const store = load();
   if (!store.users) store.users = JSON.parse(JSON.stringify(seedUsers));
-  store.users = store.users.filter(u => u.id !== id);
+  store.users = store.users!.filter(u => u.id !== id);
   persist(store);
 }
 
 export function deleteUserById(id: string): void {
   const store = load();
   if (!store.users) store.users = JSON.parse(JSON.stringify(seedUsers));
-  store.users = store.users.filter(u => u.id !== id);
+  store.users = store.users!.filter(u => u.id !== id);
   persist(store);
 }
 
@@ -406,17 +406,17 @@ export function getDepartments(): Department[] {
 export function saveDepartment(dept: Department): void {
   const store = load();
   if (!store.departments) store.departments = JSON.parse(JSON.stringify(seedDepts));
-  const idx = store.departments.findIndex(d => d.id === dept.id);
-  if (idx >= 0) store.departments[idx] = dept;
-  else store.departments.push(dept);
+  const idx = store.departments!.findIndex(d => d.id === dept.id);
+  if (idx >= 0) store.departments![idx] = dept;
+  else store.departments!.push(dept);
   persist(store);
 }
 
 export function updateDepartment(id: string, updates: Partial<Department>): void {
   const store = load();
   if (!store.departments) store.departments = JSON.parse(JSON.stringify(seedDepts));
-  const idx = store.departments.findIndex(d => d.id === id);
-  if (idx >= 0) store.departments[idx] = { ...store.departments[idx], ...updates };
+  const idx = store.departments!.findIndex(d => d.id === id);
+  if (idx >= 0) store.departments![idx] = { ...store.departments![idx], ...updates };
   persist(store);
 }
 
@@ -427,7 +427,7 @@ export function deleteDepartment(id: string): void {
 export function deleteDepartmentById(id: string): void {
   const store = load();
   if (!store.departments) store.departments = JSON.parse(JSON.stringify(seedDepts));
-  store.departments = store.departments.filter(d => d.id !== id);
+  store.departments = store.departments!.filter(d => d.id !== id);
   persist(store);
 }
 
@@ -440,17 +440,17 @@ export function getGroups(): UserGroup[] {
 export function saveGroup(group: UserGroup): void {
   const store = load();
   if (!store.userGroups) store.userGroups = JSON.parse(JSON.stringify(seedGroups));
-  const idx = store.userGroups.findIndex(g => g.id === group.id);
-  if (idx >= 0) store.userGroups[idx] = group;
-  else store.userGroups.push(group);
+  const idx = store.userGroups!.findIndex(g => g.id === group.id);
+  if (idx >= 0) store.userGroups![idx] = group;
+  else store.userGroups!.push(group);
   persist(store);
 }
 
 export function updateGroup(id: string, updates: Partial<UserGroup>): void {
   const store = load();
   if (!store.userGroups) store.userGroups = JSON.parse(JSON.stringify(seedGroups));
-  const idx = store.userGroups.findIndex(g => g.id === id);
-  if (idx >= 0) store.userGroups[idx] = { ...store.userGroups[idx], ...updates };
+  const idx = store.userGroups!.findIndex(g => g.id === id);
+  if (idx >= 0) store.userGroups![idx] = { ...store.userGroups![idx], ...updates };
   persist(store);
 }
 
@@ -461,7 +461,7 @@ export function deleteGroup(id: string): void {
 export function deleteGroupById(id: string): void {
   const store = load();
   if (!store.userGroups) store.userGroups = JSON.parse(JSON.stringify(seedGroups));
-  store.userGroups = store.userGroups.filter(g => g.id !== id);
+  store.userGroups = store.userGroups!.filter(g => g.id !== id);
   persist(store);
 }
 
@@ -565,13 +565,15 @@ export function deleteTask(id: string): void {
 
 // ─── Event Recommendations ────────────────────────────────────────────────────
 
+
 export function getEventRecommendations(eventId: string): EventRec[] {
-  return load().recommendations?.[eventId] ?? [];
+  const store = load();
+  return store.recommendations?.[eventId] ?? [];
 }
 
 export function saveEventRecommendations(eventId: string, recs: EventRec[]): void {
   const store = load();
   if (!store.recommendations) store.recommendations = {};
-  store.recommendations[eventId] = recs;
+  store.recommendations![eventId] = recs;
   persist(store);
 }

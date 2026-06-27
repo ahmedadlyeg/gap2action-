@@ -625,10 +625,10 @@ export function RecommendationsTab({ event, onNavigateRoadmap }: Recommendations
     // 2. Build from real gap data
     const data = resultsByEventId[event.id] ?? buildEventResults(event);
     const baseRecs: EventRec[] = data
-      ? data.sections
-          .filter(s => s.achievedScore < s.targetScore)
-          .sort((a, b) => (a.achievedScore - a.targetScore) - (b.achievedScore - b.targetScore))
-          .map((s, i) => {
+      ? (data.sections as { id: string; name: string; achievedScore: number; targetScore: number }[])
+          .filter((s: { achievedScore: number; targetScore: number }) => s.achievedScore < s.targetScore)
+          .sort((a: { achievedScore: number; targetScore: number }, b: { achievedScore: number; targetScore: number }) => (a.achievedScore - a.targetScore) - (b.achievedScore - b.targetScore))
+          .map((s: { id: string; name: string; achievedScore: number; targetScore: number }, i: number) => {
             const gap = s.achievedScore - s.targetScore;
             const gapPct = Math.round(Math.abs(gap) / s.targetScore * 100);
             const text = `Section "${s.name}" is ${Math.abs(gap).toFixed(1)} points below its target score `

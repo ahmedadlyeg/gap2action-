@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import {
   ClipboardList, Users, BarChart2, AlertCircle, Map as MapIcon, GitCompare,
@@ -27,21 +27,16 @@ import { RecommendationsTab } from '@/components/event/RecommendationsTab';
 import { RoadmapTab } from '@/components/event/RoadmapTab';
 import { CompareTab } from '@/components/event/CompareTab';
 import { useToast } from '@/context/ToastContext';
-import { getEvents, getTemplates, getUsers, getSubmission, saveSubmission, getTemplateSections, saveRespondentAction, getRespondentAction, getReturnFeedback, getUserAssignedSections, getSectionRespondents, updateEvent } from '@/services/store';
-import { recomputeEventScore, getMaturityLabel } from '@/utils/scoring';
-import type { AssessmentEvent, Template, RespondentProgress, RespondentStatus } from '@/types';
+import { eventsApi, usersApi, submissionsApi, type ApiEvent, type ApiUser, type ApiRespondent } from '@/services/api';
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function userName(uid: string) {
-  return getUsers().find(u => u.id === uid)?.name ?? `User ${uid}`;
-}
-function userInitials(uid: string) {
-  return getUsers().find(u => u.id === uid)?.initials ?? '??';
-}
-function userDept(uid: string) {
-  return getUsers().find(u => u.id === uid)?.department ?? '—';
-}
+// These will be replaced at runtime by a users map populated from the API
+let _usersMap: Map<string, ApiUser> = new Map();
+function userName(uid: string) { return _usersMap.get(uid)?.name ?? `User ${uid}`; }
+function userInitials(uid: string) { return _usersMap.get(uid)?.initials ?? '??'; }
+function userDept(uid: string) { return _usersMap.get(uid)?.email ?? '—'; }
 function formatDate(iso?: string) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -58,13 +53,16 @@ function formatRelative(iso?: string) {
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
-const STATUS_CFG: Record<RespondentStatus, { label: string; textCls: string; bgCls: string; dot: string }> = {
-  'Not Started':          { label: 'Not Started',          textCls: 'text-slate-600',   bgCls: 'bg-slate-100',   dot: 'bg-slate-400' },
-  'In Progress':          { label: 'In Progress',          textCls: 'text-blue-700',    bgCls: 'bg-blue-100',    dot: 'bg-blue-500' },
-  'Submitted':            { label: 'Submitted',            textCls: 'text-amber-700',   bgCls: 'bg-amber-100',   dot: 'bg-amber-500' },
-  'Validated':            { label: 'Validated',            textCls: 'text-emerald-700', bgCls: 'bg-emerald-100', dot: 'bg-emerald-500' },
-  'Returned':             { label: 'Returned',             textCls: 'text-orange-700',  bgCls: 'bg-orange-100',  dot: 'bg-orange-500' },
-  'Returned for Revision':{ label: 'Returned for Revision',textCls: 'text-amber-700',   bgCls: 'bg-amber-100',   dot: 'bg-amber-500' },
+const STATUS_CFG: Record<string, { label: string; textCls: string; bgCls: string; dot: string }> = {
+  'Not Started':            { label: 'Not Started',          textCls: 'text-slate-600',   bgCls: 'bg-slate-100',   dot: 'bg-slate-400' },
+  'Not_Started':            { label: 'Not Started',          textCls: 'text-slate-600',   bgCls: 'bg-slate-100',   dot: 'bg-slate-400' },
+  'In Progress':            { label: 'In Progress',          textCls: 'text-blue-700',    bgCls: 'bg-blue-100',    dot: 'bg-blue-500' },
+  'In_Progress':            { label: 'In Progress',          textCls: 'text-blue-700',    bgCls: 'bg-blue-100',    dot: 'bg-blue-500' },
+  'Submitted':              { label: 'Submitted',            textCls: 'text-amber-700',   bgCls: 'bg-amber-100',   dot: 'bg-amber-500' },
+  'Validated':              { label: 'Validated',            textCls: 'text-emerald-700', bgCls: 'bg-emerald-100', dot: 'bg-emerald-500' },
+  'Returned':               { label: 'Returned',             textCls: 'text-orange-700',  bgCls: 'bg-orange-100',  dot: 'bg-orange-500' },
+  'Returned for Revision':  { label: 'Returned for Revision',textCls: 'text-amber-700',   bgCls: 'bg-amber-100',   dot: 'bg-amber-500' },
+  'Returned_for_Revision':  { label: 'Returned for Revision',textCls: 'text-amber-700',   bgCls: 'bg-amber-100',   dot: 'bg-amber-500' },
 };
 
 const EVENT_STATUS_VARIANT: Record<string, 'success' | 'warning' | 'secondary' | 'outline'> = {
@@ -114,18 +112,19 @@ function ReadinessGauge({ value, label }: { value: number; label: string }) {
 
 // ─── Status Breakdown Bar ─────────────────────────────────────────────────────
 
-function StatusBar({ progress }: { progress: RespondentProgress[] }) {
+function StatusBar({ progress }: { progress: { status: string }[] }) {
   const total = progress.length;
   if (total === 0) return null;
-  const counts = Object.fromEntries(
-    Object.keys(STATUS_CFG).map(s => [s, 0])
-  ) as Record<RespondentStatus, number>;
+  const counts: Record<string, number> = {};
   progress.forEach(p => { counts[p.status] = (counts[p.status] ?? 0) + 1; });
 
-  const order: RespondentStatus[] = ['Validated', 'Submitted', 'In Progress', 'Returned', 'Not Started'];
-  const bgColors: Record<RespondentStatus, string> = {
+  const order = ['Validated', 'Submitted', 'In_Progress', 'In Progress', 'Returned_for_Revision', 'Returned for Revision', 'Returned', 'Not_Started', 'Not Started'];
+  const bgColors: Record<string, string> = {
     Validated: 'bg-emerald-500', Submitted: 'bg-amber-400',
-    'In Progress': 'bg-blue-500', Returned: 'bg-orange-400', 'Not Started': 'bg-slate-300',
+    'In Progress': 'bg-blue-500', 'In_Progress': 'bg-blue-500',
+    Returned: 'bg-orange-400',
+    'Returned for Revision': 'bg-orange-400', 'Returned_for_Revision': 'bg-orange-400',
+    'Not Started': 'bg-slate-300', 'Not_Started': 'bg-slate-300',
   };
 
   return (
@@ -158,16 +157,18 @@ function StatusBar({ progress }: { progress: RespondentProgress[] }) {
 
 function ViewResponseSheet({
   open, userId, event, onClose,
-}: { open: boolean; userId: string | null; event: AssessmentEvent; onClose: () => void }) {
+}: { open: boolean; userId: string | null; event: ApiEvent; onClose: () => void }) {
   const uName = userId ? userName(userId) : '';
-  const submission = userId ? getSubmission(event.id, userId) : null;
-  const allSections = getTemplateSections(event.templateId) ?? [];
-  const allSectionIds = allSections.map(s => s.id);
-  const assignedIds = userId
-    ? getUserAssignedSections(event, userId, allSectionIds)
-    : allSectionIds;
-  const visibleSections = allSections.filter(s => assignedIds.includes(s.id));
-  const isFiltered = assignedIds.length < allSectionIds.length;
+  const [submission, setSubmission] = useState<import('@/services/api').ApiSubmission | null>(null);
+  useEffect(() => {
+    if (!open || !userId) { setSubmission(null); return; }
+    submissionsApi.get(event.id, userId).then(setSubmission).catch(() => setSubmission(null));
+  }, [open, userId, event.id]);
+
+  const allSections = event.template?.sections ?? [];
+  // Use all sections (section assignment filtering is a future improvement post-API)
+  const visibleSections = allSections;
+  const isFiltered = false;
 
   type QAPair = { qNum: number; qId: string; text: string; answer: string; type: string };
   const qaPairs: QAPair[] = [];
@@ -198,14 +199,14 @@ function ViewResponseSheet({
           <SheetTitle className="text-base font-semibold">Response — {uName}</SheetTitle>
           <SheetDescription className="text-xs text-muted-foreground">
             {submission
-              ? `${submission.completionPct}% complete · ${STATUS_CFG[submission.status as RespondentStatus]?.label ?? submission.status}`
-              : ''}
+              ? `Submitted ${submission.submittedAt ? new Date(submission.submittedAt).toLocaleDateString() : '—'}`
+              : 'No submission yet'}
           </SheetDescription>
         </SheetHeader>
         <SheetBody className="space-y-5">
           {isFiltered && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-              Viewing <strong>{assignedIds.length}</strong> assigned sections
+              Viewing <strong>0</strong> assigned sections
             </div>
           )}
           {!submission ? (
@@ -220,7 +221,7 @@ function ViewResponseSheet({
             </div>
           ) : (
             qaPairs.map((qa) => {
-                const evidenceFiles = (submission?.evidence as Record<string, { id: string; name: string; size: string }[]> | undefined)?.[qa.qId] ?? [];
+                const evidenceFiles = ((submission as unknown as { evidence?: Record<string, { id: string; name: string; size: string }[]> })?.evidence)?.[qa.qId] ?? [];
                 return (
                   <div key={qa.qNum} className="space-y-2">
                     <div className="flex items-start gap-2">
@@ -328,44 +329,39 @@ export function EventDashboard() {
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const VALID_TABS = ['overview', 'submissions', 'results', 'gaps', 'recommendations', 'roadmap', 'compare'];
-  const allEvents = new Map(
-    getEvents().map(e => [e.id, e])
-  );
-  const event = id ? allEvents.get(id) : undefined;
-  const template = (event ? getTemplates().find(t => t.id === event.templateId) : null) ?? null;
 
   const { toast } = useToast();
   const [tab, setTab] = useState(VALID_TABS.includes(tabParam ?? '') ? tabParam! : 'overview');
-  const [pendingRecName, setPendingRecName] = useState<string | null>(null);
-  const [progress, setProgress] = useState<RespondentProgress[]>(() => {
-    const base = event?.respondentProgress ?? [];
-    if (!event) return base;
-    return base.map(p => {
-      const action = getRespondentAction(event.id, p.userId);
-      if (!action) return p;
-      if (action.status === 'Returned for Revision') {
-        return {
-          ...p,
-          status: 'Returned for Revision' as const,
-          feedback: action.feedback ?? p.feedback,
-          returnCount: action.returnCount,
-          lastActivity: action.actionAt ?? p.lastActivity,
-        };
-      }
-      if (action.status === 'Validated') {
-        return {
-          ...p,
-          status: 'Validated' as const,
-          lastActivity: action.actionAt ?? p.lastActivity,
-        };
-      }
-      return p;
-    });
-  });
+  const [_pendingRecName, _setPendingRecName] = useState<string | null>(null);
+  const [event, setEvent] = useState<ApiEvent | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState<ApiRespondent[]>([]);
   const [viewUserId, setViewUserId] = useState<string | null>(null);
   const [returnUserId, setReturnUserId] = useState<string | null>(null);
   const [filter, setFilter] = useState<SubmissionsFilter>('all');
 
+  const loadEvent = useCallback(async () => {
+    if (!id) return;
+    try {
+      const [evt, users] = await Promise.all([
+        eventsApi.get(id),
+        usersApi.list().catch(() => [] as ApiUser[]),
+      ]);
+      _usersMap = new Map(users.map(u => [u.id, u]));
+      setEvent(evt);
+      setProgress(evt.respondents);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { loadEvent(); }, [loadEvent]);
+
+  const template = event?.template ?? null;
+
+  if (loading) {
+    return <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">Loading…</div>;
+  }
   if (!event) {
     return <PlaceholderPage title="Event not found" description="The requested event does not exist." />;
   }
@@ -374,81 +370,48 @@ export function EventDashboard() {
   const total = progress.length;
   const submitted = progress.filter(p => p.status === 'Submitted').length;
   const validated = progress.filter(p => p.status === 'Validated').length;
-  const notStarted = progress.filter(p => p.status === 'Not Started').length;
-  const inProgress = progress.filter(p => p.status === 'In Progress' || p.status === 'Returned for Revision').length;
-  const gaugeValue = event.score ?? Math.round((submitted + validated) / Math.max(1, total) * 100);
-  const gaugeLabel = event.score != null ? 'Assessment Score' : 'Completion';
+  const notStarted = progress.filter(p => p.status === 'Not_Started').length;
+  const inProgress = progress.filter(p => p.status === 'In_Progress' || p.status === 'Returned_for_Revision').length;
+  const gaugeValue = Math.round((submitted + validated) / Math.max(1, total) * 100);
+  const gaugeLabel = 'Completion';
 
-  // Actions
-  const validateUser = (uid: string) => {
-    const now = new Date().toISOString();
-    const existing = getRespondentAction(event.id, uid);
-    setProgress(prev => prev.map(p =>
-      p.userId === uid ? { ...p, status: 'Validated', lastActivity: now } : p
-    ));
-    saveRespondentAction(event.id, uid, {
-      status: 'Validated',
-      returnCount: existing?.returnCount ?? 0,
-      actionAt: now,
-    });
-    // Recompute aggregate score across all validated + submitted respondents
-    const aggScore = recomputeEventScore(event);
-    if (aggScore !== undefined) {
-      const maturity = getMaturityLabel(aggScore) as import('@/types').MaturityLevel;
-      updateEvent(event.id, { score: aggScore, maturityLevel: maturity });
+  // Actions — call API and refresh respondents list
+  const validateUser = async (uid: string) => {
+    try {
+      await submissionsApi.validate(event.id, uid);
+      setProgress(prev => prev.map(p =>
+        p.userId === uid ? { ...p, status: 'Validated' as const } : p
+      ));
+      toast({ title: 'Response validated', variant: 'success' });
+    } catch {
+      toast({ title: 'Failed to validate', variant: 'error' });
     }
-    toast({ title: 'Response validated', variant: 'success' });
   };
 
-  const returnUser = (uid: string, feedback: string) => {
-    const now = new Date().toISOString();
-
-    // 1. Load existing action to carry forward returnCount
-    const existing = getRespondentAction(event.id, uid);
-    const returnCount = (existing?.returnCount ?? 0) + 1;
-
-    // 2. Persist to store
-    saveRespondentAction(event.id, uid, {
-      status: 'Returned for Revision',
-      feedback,
-      returnedAt: now,
-      returnCount,
-      actionAt: now,
-    });
-
-    // 3. Demote submission status so it no longer counts as Submitted
-    const sub = getSubmission(event.id, uid);
-    if (sub) {
-      saveSubmission(event.id, uid, { ...sub, status: 'In Progress' });
+  const returnUser = async (uid: string, feedback: string) => {
+    try {
+      await submissionsApi.return(event.id, uid, feedback);
+      setProgress(prev => prev.map(p =>
+        p.userId === uid
+          ? { ...p, status: 'Returned_for_Revision' as const, feedback }
+          : p
+      ));
+      setReturnUserId(null);
+      toast({ title: 'Submission returned for revision', description: 'The respondent will be asked to revise.', variant: 'warning' });
+    } catch {
+      toast({ title: 'Failed to return submission', variant: 'error' });
     }
-
-    // 4. Update local UI state
-    setProgress(prev => prev.map(p =>
-      p.userId === uid
-        ? { ...p, status: 'Returned for Revision', feedback, returnCount, lastActivity: now }
-        : p
-    ));
-    setReturnUserId(null);
-    toast({ title: 'Submission returned for revision', description: 'The respondent will be asked to revise.', variant: 'warning' });
   };
 
-  // Template sections — computed once for badge + overdue logic
-  const templateSections = getTemplateSections(event.templateId) ?? [];
-  const allTemplateSectionIds = templateSections.map(s => s.id);
-  const isPastDue = new Date(event.endDate) < new Date();
-
-  const hasAssignedSection = (uid: string) =>
-    getUserAssignedSections(event, uid, allTemplateSectionIds).length > 0;
+  const templateSections = event.template?.sections ?? [];
+  const isPastDue = event.endDate ? new Date(event.endDate) < new Date() : false;
 
   // Filter submissions
   const filteredProgress = progress.filter(p => {
     if (filter === 'pending') return p.status === 'Submitted';
-    if (filter === 'not-started') return p.status === 'Not Started';
+    if (filter === 'not-started') return p.status === 'Not_Started';
     if (filter === 'overdue') {
-      return hasAssignedSection(p.userId)
-        && p.status !== 'Submitted'
-        && p.status !== 'Validated'
-        && isPastDue;
+      return p.status !== 'Submitted' && p.status !== 'Validated' && isPastDue;
     }
     return true;
   });
@@ -670,7 +633,7 @@ export function EventDashboard() {
                     { key: 'all', label: 'All', count: total },
                     { key: 'pending', label: 'Pending Validation', count: submitted },
                     { key: 'not-started', label: 'Not Started', count: notStarted },
-                    { key: 'overdue', label: 'Overdue', count: progress.filter(p => hasAssignedSection(p.userId) && p.status !== 'Submitted' && p.status !== 'Validated' && isPastDue).length },
+                    { key: 'overdue', label: 'Overdue', count: progress.filter(p => p.status !== 'Submitted' && p.status !== 'Validated' && isPastDue).length },
                   ] as const).map(f => (
                     <button
                       key={f.key}
@@ -708,12 +671,9 @@ export function EventDashboard() {
                     </thead>
                     <tbody className="divide-y">
                       {filteredProgress.map(p => {
-                        const cfg = STATUS_CFG[p.status];
-                        const submission = getSubmission(event.id, p.userId);
-                        const completionPct = submission?.completionPct ?? 0;
-                        const assignedCount = event.sectionAssignments
-                          ? getUserAssignedSections(event, p.userId, allTemplateSectionIds).length
-                          : null;
+                        const cfg = STATUS_CFG[p.status] ?? STATUS_CFG['Not_Started'];
+                        const completionPct = p.completionPct ?? 0;
+                        const assignedCount = null; // section assignment filtering handled by API in future
                         return (
                           <tr key={p.userId} className="group hover:bg-muted/20 transition-colors">
                             {/* Respondent */}
@@ -729,7 +689,7 @@ export function EventDashboard() {
                                       </span>
                                     )}
                                   </div>
-                                  {(p.status === 'Returned' || p.status === 'Returned for Revision') && p.feedback && (
+                                  {(p.status === 'Returned' || p.status === 'Returned for Revision' || p.status === 'Returned_for_Revision') && p.feedback && (
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <p className="text-xs text-amber-700 truncate max-w-[180px] cursor-help">
@@ -753,9 +713,9 @@ export function EventDashboard() {
                                   <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
                                   {cfg.label}
                                 </span>
-                                {p.status === 'Returned for Revision' && (p.returnCount ?? 0) > 1 && (
+                                {(p.status === 'Returned for Revision' || p.status === 'Returned_for_Revision') && ((p as unknown as { returnCount?: number }).returnCount ?? 0) > 1 && (
                                   <span className="text-[10px] text-muted-foreground">
-                                    (returned {p.returnCount}x)
+                                    (returned {(p as unknown as { returnCount?: number }).returnCount}x)
                                   </span>
                                 )}
                               </div>
@@ -867,35 +827,35 @@ export function EventDashboard() {
             {/* RESULTS */}
             {tab === 'results' && (
               <ErrorBoundary>
-                <ResultsTab event={event} template={template} />
+                <ResultsTab event={event as unknown as import('@/types').AssessmentEvent} template={template as unknown as import('@/types').Template | null} />
               </ErrorBoundary>
             )}
 
             {/* GAPS */}
             {tab === 'gaps' && (
               <ErrorBoundary>
-                <GapsTab event={event} template={template} />
+                <GapsTab event={event as unknown as import('@/types').AssessmentEvent} />
               </ErrorBoundary>
             )}
 
             {/* RECOMMENDATIONS */}
             {tab === 'recommendations' && (
               <ErrorBoundary>
-                <RecommendationsTab event={event} template={template} />
+                <RecommendationsTab event={event as unknown as import('@/types').AssessmentEvent} />
               </ErrorBoundary>
             )}
 
             {/* ROADMAP */}
             {tab === 'roadmap' && (
               <ErrorBoundary>
-                <RoadmapTab event={event} template={template} />
+                <RoadmapTab event={event as unknown as import('@/types').AssessmentEvent} />
               </ErrorBoundary>
             )}
 
             {/* COMPARE */}
             {tab === 'compare' && (
               <ErrorBoundary>
-                <CompareTab event={event} template={template} />
+                <CompareTab event={event as unknown as import('@/types').AssessmentEvent} />
               </ErrorBoundary>
             )}
 

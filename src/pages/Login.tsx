@@ -1,8 +1,19 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Eye, EyeOff, ArrowRight, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
+
+function MicrosoftLogo() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0"  y="0"  width="10" height="10" fill="#f25022" />
+      <rect x="11" y="0"  width="10" height="10" fill="#7fba00" />
+      <rect x="0"  y="11" width="10" height="10" fill="#00a4ef" />
+      <rect x="11" y="11" width="10" height="10" fill="#ffb900" />
+    </svg>
+  );
+}
 export function Login() {
   const navigate = useNavigate();
   const { login, isLoading } = useAuth();
@@ -17,16 +28,21 @@ export function Login() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
-    const ok = await login(email, password);
-    if (ok) {
+    const result = await login(email, password);
+    if (result.success) {
       navigate('/', { replace: true });
     } else {
-      setError('The email or password you entered is incorrect. Please try again.');
+      setError(result.error ?? 'The email or password you entered is incorrect. Please try again.');
     }
   };
 
   const handleForgotPassword = () => {
-    setToast('Password reset link sent. Check your inbox.');
+    setToast('Password reset is not available yet. Contact your administrator.');
+    setTimeout(() => setToast(''), 4000);
+  };
+
+  const handleMicrosoftSSO = () => {
+    setToast('Microsoft SSO coming soon. Use email and password for now.');
     setTimeout(() => setToast(''), 4000);
   };
 
@@ -38,7 +54,6 @@ export function Login() {
       {/* Toast */}
       {toast && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-2xl">
-          <CheckCircle2 size={16} className="shrink-0" />
           {toast}
         </div>
       )}
@@ -246,6 +261,29 @@ export function Login() {
               ) : (
                 <>Sign in <ArrowRight size={16} /></>
               )}
+            </button>
+
+            {/* Divider */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '18px 0' }}>
+              <div style={{ flex: 1, height: 1, background: '#dbe1e8' }} />
+              <span style={{ fontSize: 12, color: '#9aa5b1', whiteSpace: 'nowrap' }}>or continue with</span>
+              <div style={{ flex: 1, height: 1, background: '#dbe1e8' }} />
+            </div>
+            <button
+              type="button"
+              onClick={handleMicrosoftSSO}
+              style={{
+                width: '100%', height: 44, borderRadius: 12,
+                border: '1.5px solid #dbe1e8', background: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                fontSize: 14, fontWeight: 600, color: '#161c25',
+                cursor: 'pointer', transition: 'border-color .15s, background .15s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#9aa5b1'; (e.currentTarget as HTMLElement).style.background = '#f9fafb'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#dbe1e8'; (e.currentTarget as HTMLElement).style.background = '#fff'; }}
+            >
+              <MicrosoftLogo />
+              Continue with Microsoft
             </button>
           </form>
 

@@ -1,7 +1,7 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   Search, Plus, Pencil, UserX, UserCheck,
-  Trash2, Users, Building2, GripVertical,
+  Trash2, Users, Building2,
   Upload, DownloadCloud,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -15,15 +15,11 @@ import {
   SheetTitle, SheetDescription, SheetClose,
 } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
-import {
-  getUsers, saveUser,
-  getDepartments, saveDepartment, deleteDepartmentById,
-  getGroups, saveGroup, deleteGroupById,
-} from '@/services/store';
+import { usersApi, type ApiUser, type ApiDepartment, type ApiGroup } from '@/services/api';
 import type { User, UserRole, UserStatus, Department, UserGroup } from '@/types';
 import {
   parseDepartmentsCSV, parseUsersCSV, parseGroupsCSV,
@@ -34,9 +30,6 @@ import { ImportPreviewModal, type ImportPreview } from '@/components/shared/Impo
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getInitials(name: string) {
-  return name.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2);
-}
 
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Admin',
@@ -697,121 +690,137 @@ function GroupsTab({ groups, allUsers, isAdmin, onAdd, onEdit, onDelete, onImpor
 
 type Tab = 'users' | 'departments' | 'groups';
 
+function apiUserToLocal(u: ApiUser, deptMap: Map<string, string>): User {
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.role,
+    status: u.status,
+    initials: u.initials,
+    groupIds: u.groupIds ?? [],
+    department: u.departmentId ? deptMap.get(u.departmentId) : undefined,
+  };
+}
+
 export function UserManagement() {
   const { user: currentUser } = useAuth();
   const { toast } = useToast();
   const isAdmin = currentUser?.role === 'admin';
 
   const [tab, setTab] = useState<Tab>('users');
-
-  // State loaded from and persisted to store
-  const [localUsers, setLocalUsers] = useState<User[]>(() => getUsers());
-  const [localDepts, setLocalDepts] = useState<Department[]>(() => getDepartments());
-  const [localGroups, setLocalGroups] = useState<UserGroup[]>(() => getGroups());
+  const [localUsers, setLocalUsers] = useState<User[]>([]);
+  const [localDepts, setLocalDepts] = useState<Department[]>([]);
+  const [localGroups, setLocalGroups] = useState<UserGroup[]>([]);
+  const [activeImport, setActiveImport] = useState<ActiveImport | null>(null);
 
   const deptNames = localDepts.map(d => d.name);
 
-  // ── Import state ──
-  const [activeImport, setActiveImport] = useState<ActiveImport | null>(null);
+  // ─── Load from API ────────────────────────────────────────────────────────
+
+  const reload = useCallback(async () => {
+    const [apiUsers, depts, groups] = await Promise.all([
+      usersApi.list().catch(() => [] as ApiUser[]),
+      usersApi.departments().catch(() => [] as ApiDepartment[]),
+      usersApi.groups().catch(() => [] as ApiGroup[]),
+    ]);
+    const deptMap = new Map(depts.map(d => [d.id, d.name]));
+    setLocalUsers(apiUsers.map(u => apiUserToLocal(u, deptMap)));
+    setLocalDepts(depts as Department[]);
+    setLocalGroups(groups as UserGroup[]);
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
 
   // ─── User mutations ───────────────────────────────────────────────────────
 
-  const addUser = (data: UserFormData) => {
-    const user: User = {
-      id: crypto.randomUUID(),
+  const addUser = async (data: UserFormData) => {
+    const deptId = data.department
+      ? localDepts.find(d => d.name === data.department)?.id
+      : undefined;
+    try {
+      const created = await usersApi.create({
+        name: data.name.trim(),
+        email: data.email,
+        password: 'ChangeMe123!',
+        role: data.role,
+        ...(deptId && { departmentId: deptId }),
+      });
+      // Sync group memberships
+      for (const gid of data.groupIds) {
+        const g = localGroups.find(g => g.id === gid);
+        if (g) await usersApi.updateGroup(gid, { memberIds: [...new Set([...g.memberIds, created.id])] }).catch(() => {});
+      }
+      await reload();
+      toast({ title: 'User created', description: `${data.name} has been added.` });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create user';
+      toast({ title: 'Error', description: msg, variant: 'error' });
+    }
+  };
+
+  const editUser = async (original: User, data: UserFormData) => {
+    const deptId = data.department
+      ? (localDepts.find(d => d.name === data.department)?.id ?? null)
+      : null;
+    await usersApi.update(original.id, {
       name: data.name.trim(),
-      email: data.email,
       role: data.role,
       status: data.status,
-      department: data.department || undefined,
-      groupIds: data.groupIds,
-      initials: getInitials(data.name),
-    };
-    saveUser(user);
-    // Update group memberships in store
-    const updatedGroups = localGroups.map(g => {
-      const updated = { ...g, memberIds: data.groupIds.includes(g.id) ? [...new Set([...g.memberIds, user.id])] : g.memberIds.filter(m => m !== user.id) };
-      if (updated.memberIds.length !== g.memberIds.length || updated.memberIds.some((id, i) => id !== g.memberIds[i])) saveGroup(updated);
-      return updated;
-    });
-    setLocalUsers(getUsers());
-    setLocalGroups(updatedGroups);
-  };
-
-  const editUser = (original: User, data: UserFormData) => {
-    const updated: User = { ...original, name: data.name.trim(), email: data.email, role: data.role, status: data.status, department: data.department || undefined, groupIds: data.groupIds, initials: getInitials(data.name) };
-    saveUser(updated);
-    const updatedGroups = localGroups.map(g => {
+      departmentId: deptId,
+    }).catch(() => {});
+    // Sync group memberships
+    for (const g of localGroups) {
       const inGroup = data.groupIds.includes(g.id);
-      const memberIds = inGroup ? [...new Set([...g.memberIds, original.id])] : g.memberIds.filter(m => m !== original.id);
-      const changed = memberIds.length !== g.memberIds.length || memberIds.some((id, i) => id !== g.memberIds[i]);
-      if (changed) { const ng = { ...g, memberIds }; saveGroup(ng); return ng; }
-      return g;
-    });
-    setLocalUsers(getUsers());
-    setLocalGroups(updatedGroups);
+      const wasIn = g.memberIds.includes(original.id);
+      if (inGroup !== wasIn) {
+        const next = inGroup
+          ? [...new Set([...g.memberIds, original.id])]
+          : g.memberIds.filter(m => m !== original.id);
+        await usersApi.updateGroup(g.id, { memberIds: next }).catch(() => {});
+      }
+    }
+    await reload();
   };
 
-  const toggleStatus = (user: User) => {
-    const updated = { ...user, status: user.status === 'Active' ? 'Inactive' as UserStatus : 'Active' as UserStatus };
-    saveUser(updated);
-    setLocalUsers(getUsers());
+  const toggleStatus = async (user: User) => {
+    const newStatus = user.status === 'Active' ? 'Inactive' : 'Active';
+    await usersApi.update(user.id, { status: newStatus as User['status'] }).catch(() => {});
+    await reload();
   };
 
   // ─── Department mutations ─────────────────────────────────────────────────
 
-  const addDept = (name: string) => {
-    saveDepartment({ id: crypto.randomUUID(), name });
-    setLocalDepts(getDepartments());
+  const addDept = async (name: string) => {
+    await usersApi.createDepartment(name).catch(() => {});
+    await reload();
   };
 
-  const renameDept = (id: string, name: string) => {
-    const old = localDepts.find(d => d.id === id)?.name;
-    saveDepartment({ id, name });
-    if (old && old !== name) {
-      getUsers().filter(u => u.department === old).forEach(u => saveUser({ ...u, department: name }));
-    }
-    setLocalDepts(getDepartments());
-    setLocalUsers(getUsers());
+  const renameDept = async (id: string, name: string) => {
+    await usersApi.updateDepartment(id, name).catch(() => {});
+    await reload();
   };
 
-  const deleteDept = (id: string) => {
-    deleteDepartmentById(id);
-    setLocalDepts(getDepartments());
+  const deleteDept = async (id: string) => {
+    await usersApi.deleteDepartment(id).catch(() => {});
+    await reload();
   };
 
   // ─── Group mutations ──────────────────────────────────────────────────────
 
-  const addGroup = (name: string, memberIds: string[]) => {
-    const id = crypto.randomUUID();
-    saveGroup({ id, name, memberIds });
-    memberIds.forEach(uid => {
-      const u = localUsers.find(u => u.id === uid);
-      if (u) saveUser({ ...u, groupIds: [...new Set([...(u.groupIds ?? []), id])] });
-    });
-    setLocalGroups(getGroups());
-    setLocalUsers(getUsers());
+  const addGroup = async (name: string, memberIds: string[]) => {
+    await usersApi.createGroup({ name, memberIds }).catch(() => {});
+    await reload();
   };
 
-  const editGroup = (original: UserGroup, name: string, memberIds: string[]) => {
-    saveGroup({ ...original, name, memberIds });
-    localUsers.forEach(u => {
-      const inGroup = memberIds.includes(u.id);
-      const hadGroup = (u.groupIds ?? []).includes(original.id);
-      if (inGroup && !hadGroup) saveUser({ ...u, groupIds: [...(u.groupIds ?? []), original.id] });
-      else if (!inGroup && hadGroup) saveUser({ ...u, groupIds: (u.groupIds ?? []).filter(g => g !== original.id) });
-    });
-    setLocalGroups(getGroups());
-    setLocalUsers(getUsers());
+  const editGroup = async (original: UserGroup, name: string, memberIds: string[]) => {
+    await usersApi.updateGroup(original.id, { name, memberIds }).catch(() => {});
+    await reload();
   };
 
-  const deleteGroup = (id: string) => {
-    deleteGroupById(id);
-    localUsers.forEach(u => {
-      if ((u.groupIds ?? []).includes(id)) saveUser({ ...u, groupIds: (u.groupIds ?? []).filter(g => g !== id) });
-    });
-    setLocalGroups(getGroups());
-    setLocalUsers(getUsers());
+  const deleteGroup = async (id: string) => {
+    await usersApi.deleteGroup(id).catch(() => {});
+    await reload();
   };
 
   // ─── Import file handlers ─────────────────────────────────────────────────
@@ -824,12 +833,10 @@ export function UserManagement() {
       const existingNames = new Set(localDepts.map(d => d.name.toLowerCase()));
       const newCount = rows.filter(r => !existingNames.has(r.name.toLowerCase())).length;
       const preview: ImportPreview = {
-        totalRows: rows.length,
-        validRows: rows.length - errors.filter(e => e.startsWith('Row')).length,
-        newItems: newCount,
-        updatedItems: rows.length - newCount,
-        columns: ['Name'],
-        sampleRows: rows.slice(0, 5).map(r => [r.name]),
+        total: rows.length,
+        newCount,
+        conflictCount: rows.length - newCount,
+        rows: rows.slice(0, 5).map(r => ({ label: r.name, isNew: !existingNames.has(r.name.toLowerCase()) })),
       };
       setActiveImport({ entityType: 'departments', errors, warnings, preview, deptRows: rows });
     };
@@ -844,12 +851,10 @@ export function UserManagement() {
       const existingEmails = new Set(localUsers.map(u => u.email.toLowerCase()));
       const newCount = rows.filter(r => !existingEmails.has(r.email.toLowerCase())).length;
       const preview: ImportPreview = {
-        totalRows: rows.length,
-        validRows: rows.length - errors.filter(e => e.startsWith('Row')).length,
-        newItems: newCount,
-        updatedItems: rows.length - newCount,
-        columns: ['Name', 'Email', 'Role', 'Department', 'Status'],
-        sampleRows: rows.slice(0, 5).map(r => [r.name, r.email, r.role, r.department ?? '', r.status ?? 'Active']),
+        total: rows.length,
+        newCount,
+        conflictCount: rows.length - newCount,
+        rows: rows.slice(0, 5).map(r => ({ label: `${r.name} <${r.email}>`, isNew: !existingEmails.has(r.email.toLowerCase()) })),
       };
       setActiveImport({ entityType: 'users', errors, warnings, preview, userRows: rows });
     };
@@ -864,71 +869,50 @@ export function UserManagement() {
       const existingNames = new Set(localGroups.map(g => g.name.toLowerCase()));
       const newCount = rows.filter(r => !existingNames.has(r.name.toLowerCase())).length;
       const preview: ImportPreview = {
-        totalRows: rows.length,
-        validRows: rows.length - errors.filter(e => e.startsWith('Row')).length,
-        newItems: newCount,
-        updatedItems: rows.length - newCount,
-        columns: ['Group Name', 'Members'],
-        sampleRows: rows.slice(0, 5).map(r => [r.name, r.memberEmails.slice(0, 3).join(', ') + (r.memberEmails.length > 3 ? '…' : '')]),
+        total: rows.length,
+        newCount,
+        conflictCount: rows.length - newCount,
+        rows: rows.slice(0, 5).map(r => ({ label: `${r.name} (${r.members.length} members)`, isNew: !existingNames.has(r.name.toLowerCase()) })),
       };
       setActiveImport({ entityType: 'groups', errors, warnings, preview, groupRows: rows });
     };
     reader.readAsText(file);
   };
 
-  const handleConfirmImport = () => {
+  const handleConfirmImport = async (_mode: 'skip' | 'update') => {
     if (!activeImport) return;
     if (activeImport.entityType === 'departments' && activeImport.deptRows) {
       const existingNames = new Set(localDepts.map(d => d.name.toLowerCase()));
-      activeImport.deptRows.forEach(r => {
+      for (const r of activeImport.deptRows) {
         if (!existingNames.has(r.name.toLowerCase())) {
-          saveDepartment({ id: crypto.randomUUID(), name: r.name });
+          await usersApi.createDepartment(r.name).catch(() => {});
         }
-      });
-      setLocalDepts(getDepartments());
+      }
       toast({ title: 'Departments imported', description: `${activeImport.deptRows.length} processed.` });
     } else if (activeImport.entityType === 'users' && activeImport.userRows) {
-      const emailMap = new Map(localUsers.map(u => [u.email.toLowerCase(), u]));
-      activeImport.userRows.forEach(r => {
-        const existing = emailMap.get(r.email.toLowerCase());
-        const user: import('@/types').User = {
-          id: existing?.id ?? crypto.randomUUID(),
+      const deptMap = new Map(localDepts.map(d => [d.name.toLowerCase(), d.id]));
+      for (const r of activeImport.userRows) {
+        const deptId = r.department ? deptMap.get(r.department.toLowerCase()) : undefined;
+        await usersApi.create({
           name: r.name,
           email: r.email,
-          role: (r.role as import('@/types').UserRole) ?? 'respondent',
-          status: (r.status as import('@/types').UserStatus) ?? 'Active',
-          department: r.department || undefined,
-          groupIds: existing?.groupIds ?? [],
-          initials: getInitials(r.name),
-        };
-        saveUser(user);
-      });
-      setLocalUsers(getUsers());
+          password: 'ChangeMe123!',
+          role: (r.role as UserRole) ?? 'respondent',
+          ...(deptId && { departmentId: deptId }),
+        }).catch(() => {});
+      }
       toast({ title: 'Users imported', description: `${activeImport.userRows.length} processed.` });
     } else if (activeImport.entityType === 'groups' && activeImport.groupRows) {
-      const emailToUser = new Map(localUsers.map(u => [u.email.toLowerCase(), u]));
-      activeImport.groupRows.forEach(r => {
-        const memberIds = r.memberEmails
-          .map(e => emailToUser.get(e.toLowerCase())?.id)
+      const emailToId = new Map(localUsers.map(u => [u.email.toLowerCase(), u.id]));
+      for (const r of activeImport.groupRows) {
+        const memberIds = r.members
+          .map(e => emailToId.get(e.toLowerCase()))
           .filter((id): id is string => Boolean(id));
-        const existing = localGroups.find(g => g.name.toLowerCase() === r.name.toLowerCase());
-        const group: import('@/types').UserGroup = {
-          id: existing?.id ?? crypto.randomUUID(),
-          name: r.name,
-          memberIds,
-        };
-        saveGroup(group);
-        memberIds.forEach(uid => {
-          const u = localUsers.find(x => x.id === uid);
-          if (u && !(u.groupIds ?? []).includes(group.id)) {
-            saveUser({ ...u, groupIds: [...(u.groupIds ?? []), group.id] });
-          }
-        });
-      });
-      setLocalGroups(getGroups());
-      setLocalUsers(getUsers());
-      toast({ title: 'Groups imported', description: `${activeImport.groupRows.length} processed.` });
+        await usersApi.createGroup({ name: r.name, memberIds }).catch(() => {});
+      }
+      toast({ title: 'Groups imported', description: `${activeImport.groupRows.length} group(s) processed.` });
     }
+    await reload();
     setActiveImport(null);
   };
 
@@ -947,12 +931,12 @@ export function UserManagement() {
 
       <Tabs value={tab} onValueChange={v => setTab(v as Tab)}>
         <TabsList>
-          <TabsTrigger value="users">Users ({localUsers.length})</TabsTrigger>
-          <TabsTrigger value="departments">Departments ({localDepts.length})</TabsTrigger>
-          <TabsTrigger value="groups">Groups ({localGroups.length})</TabsTrigger>
+          <TabsTrigger value="users" activeValue={tab} onSelect={v => setTab(v as Tab)}>Users ({localUsers.length})</TabsTrigger>
+          <TabsTrigger value="departments" activeValue={tab} onSelect={v => setTab(v as Tab)}>Departments ({localDepts.length})</TabsTrigger>
+          <TabsTrigger value="groups" activeValue={tab} onSelect={v => setTab(v as Tab)}>Groups ({localGroups.length})</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="users" className="mt-4">
+        <TabsContent value="users" activeValue={tab} className="mt-4">
           <UsersTab
             users={localUsers}
             groups={localGroups}
@@ -966,7 +950,7 @@ export function UserManagement() {
           />
         </TabsContent>
 
-        <TabsContent value="departments" className="mt-4">
+        <TabsContent value="departments" activeValue={tab} className="mt-4">
           <DepartmentsTab
             departments={localDepts}
             users={localUsers}
@@ -979,7 +963,7 @@ export function UserManagement() {
           />
         </TabsContent>
 
-        <TabsContent value="groups" className="mt-4">
+        <TabsContent value="groups" activeValue={tab} className="mt-4">
           <GroupsTab
             groups={localGroups}
             allUsers={localUsers}
@@ -993,12 +977,11 @@ export function UserManagement() {
         </TabsContent>
       </Tabs>
 
-      {/* ── Import preview modal ── */}
       {activeImport && (
         <ImportPreviewModal
           open={true}
-          onOpenChange={open => { if (!open) setActiveImport(null); }}
-          title={`Import ${activeImport.entityType.charAt(0).toUpperCase() + activeImport.entityType.slice(1)}`}
+          onClose={() => setActiveImport(null)}
+          entityType={activeImport.entityType}
           errors={activeImport.errors}
           warnings={activeImport.warnings}
           preview={activeImport.preview}

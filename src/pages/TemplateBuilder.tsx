@@ -22,16 +22,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select } from '@/components/ui/select';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter,
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
-import { templates as seedTemplates } from '@/services/mockData';
-import { getTemplateSections, saveTemplateSections, updateEvent, getTemplateMeta, saveTemplateMeta, cloneTemplate, getTemplates, getVersionFamily, saveTemplate, getTemplate, updateTemplate, getFramework } from '@/services/store';
+import { getTemplateSections, saveTemplateSections, updateEvent as _updateEvent, getTemplateMeta, saveTemplateMeta, cloneTemplate, getTemplates, getVersionFamily, saveTemplate, getTemplate, updateTemplate, getFramework } from '@/services/store';
 import { useAuth } from '@/context/AuthContext';
 import type { TemplateStatus, QuestionType, AnswerOption, BuilderQuestion, BuilderSection, Template } from '@/types';
-import { scoringMethodLabel } from './FrameworkList';
 import { parseTemplateCSV, exportSectionsToCSV, generateCsvTemplate, type CsvImportResult } from '@/utils/csvImport';
 
 interface MaturityRow {
@@ -830,7 +828,7 @@ export function TemplateBuilder() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const template = seedTemplates.find(t => t.id === id) ?? getTemplates().find(t => t.id === id);
+  const template = getTemplate(id ?? '') ?? getTemplates().find(t => t.id === id);
   const framework = template?.frameworkId ? getFramework(template.frameworkId) : undefined;
   const effectiveQTypeLabels: Partial<Record<QuestionType, string>> = framework
     ? Object.fromEntries(
@@ -851,7 +849,8 @@ export function TemplateBuilder() {
     const stored = getTemplateSections(id);
     if (stored) return stored;
     // Only pre-populate with demo sections for seed templates; new user-created templates start empty
-    const isSeedTemplate = seedTemplates.some(t => t.id === id);
+    const SEED_TEMPLATE_IDS = new Set(['t1', 't2', 't2b', 't3', 't4']);
+    const isSeedTemplate = id ? SEED_TEMPLATE_IDS.has(id) : false;
     if (isSeedTemplate) {
       saveTemplateSections(id, SEED_SECTIONS);
       return SEED_SECTIONS;
@@ -1028,7 +1027,7 @@ export function TemplateBuilder() {
     setTimeout(() => setSavedAt(null), 2000);
   }, [id]);
 
-  const { requestNavigation } = useDirtyState();
+  useDirtyState(); // keep context wired
 
   // Register synchronously on every render — module-level singleton, no effect delays
   if (!locked) {
@@ -1187,7 +1186,7 @@ export function TemplateBuilder() {
           {/* ── Top bar ── */}
           <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-5 gap-4">
             <div className="flex items-center gap-3 min-w-0">
-              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => requestNavigation(-1)}>
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => { if (window.history.length > 1) window.history.back(); else navigate('/templates'); }}>
                 <ArrowLeft size={15} />
               </Button>
 
