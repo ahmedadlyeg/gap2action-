@@ -13,7 +13,8 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useAuth } from '@/context/AuthContext';
-import { getTemplates, getCategories } from '@/services/store';
+import { categoriesApi, templatesApi } from '@/services/api';
+import type { ApiCategory, ApiTemplate } from '@/services/api';
 
 const categoryIcons: Record<string, React.ElementType> = {
   'building-2': Building2,
@@ -139,19 +140,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { requestNavigation } = useDirtyState();
-  const [expandedCats, setExpandedCats] = useState<string[]>(['cat1']);
-  const [templates, setTemplates] = useState(() => getTemplates());
-  const [categories, setCategories] = useState(() => getCategories());
+  const [expandedCats, setExpandedCats] = useState<string[]>([]);
+  const [templates, setTemplates] = useState<ApiTemplate[]>([]);
+  const [categories, setCategories] = useState<ApiCategory[]>([]);
 
-  // Re-read templates + categories whenever anything writes to the store
+  // Re-fetch on every navigation so newly created/activated templates appear immediately
   useEffect(() => {
-    const handler = () => {
-      setTemplates(getTemplates());
-      setCategories(getCategories());
-    };
-    window.addEventListener('g2a-store-updated', handler);
-    return () => window.removeEventListener('g2a-store-updated', handler);
-  }, []);
+    categoriesApi.list().then(cats => {
+      setCategories(cats);
+      setExpandedCats(prev => prev.length === 0 && cats.length > 0 ? [cats[0].id] : prev);
+    }).catch(() => {});
+    templatesApi.list().then(setTemplates).catch(() => {});
+  }, [location.pathname]);
 
   const handleLogout = () => { logout(); navigate('/login', { replace: true }); };
   const toggleCat = (id: string) =>
@@ -227,35 +227,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <SectionLabel label="Assessment Categories" collapsed={collapsed} />
 
               {categories.map(cat => {
-                // Build sidebar entries: one per family showing Active + any Draft versions (no Archived)
-                const allCatTemplates = templates.filter(t => t.categoryId === cat.id);
-                const catTemplateIds = new Set(allCatTemplates.map(t => t.id));
-                const roots = allCatTemplates.filter(
-                  t => !t.parentVersionId || !catTemplateIds.has(t.parentVersionId)
-                );
-                const parseVer = (v: string) => { const [maj=0, min=0] = v.split('.').map(Number); return maj * 1000 + min; };
-
-                // For each family: pick ONE representative — Active if available, else highest Draft
-                interface SidebarEntry { tpl: typeof allCatTemplates[number] }
-                const catTemplates: SidebarEntry[] = roots.flatMap(root => {
-                  const family: typeof allCatTemplates = [];
-                  const queue = [root.id];
-                  const visited = new Set<string>();
-                  while (queue.length > 0) {
-                    const pid = queue.shift()!;
-                    if (visited.has(pid)) continue;
-                    visited.add(pid);
-                    const t = allCatTemplates.find(x => x.id === pid);
-                    if (t) {
-                      family.push(t);
-                      allCatTemplates.filter(x => x.parentVersionId === pid).forEach(c => queue.push(c.id));
-                    }
-                  }
-                  const primary =
-                    family.find(t => t.status === 'Active') ??
-                    family.filter(t => t.status !== 'Archived').sort((a, b) => parseVer(b.version) - parseVer(a.version))[0];
-                  return primary ? [{ tpl: primary }] : [];
-                });
+                const parseVer = (v: string | null | undefined) => { if (!v) return 0; const [maj=0, min=0] = v.split('.').map(Number); return maj * 1000 + min; };
+                // Show all non-archived templates for this category
+                const catTemplates = templates
+                  .filter(t => t.categoryId === cat.id && t.status !== 'Archived')
+                  .sort((a, b) => parseVer(b.version) - parseVer(a.version))
+                  .map(tpl => ({ tpl }));
                 const Icon = categoryIcons[cat.icon] ?? FolderOpen;
                 const isExpanded = expandedCats.includes(cat.id);
 
@@ -328,7 +305,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               })}
 
               <SectionLabel label="Administration" collapsed={collapsed} />
-              <NavItem to="/frameworks" icon={LayoutGrid} label="Assessment Frameworks" collapsed={collapsed} />
+              <NavItem to="/admin/frameworks" icon={LayoutGrid} label="Assessment Frameworks" collapsed={collapsed} />
               <NavItem to="/categories" icon={FolderOpen} label="Manage Categories" collapsed={collapsed} />
               <NavItem to="/users" icon={Users} label="User Management" collapsed={collapsed} />
             </>

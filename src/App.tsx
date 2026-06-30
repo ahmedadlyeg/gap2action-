@@ -44,6 +44,7 @@ function App() {
 
               <Route element={<ProtectedRoute />}>
                 <Route path="events/:id/questionnaire" element={<Questionnaire />} />
+              <Route path="templates/:id/preview" element={<Questionnaire />} />
 
                 <Route element={<AppLayout />}>
                   <Route index element={<Dashboard />} />

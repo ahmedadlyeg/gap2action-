@@ -292,13 +292,13 @@ export function Login() {
             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: '#9aa5b1', marginBottom: 10 }}>Demo credentials</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#6b7888' }}>
               {[
-                { role: 'Admin',      bg: 'rgba(19,180,207,.12)', fg: '#0c7689',  email: 'admin@nudj.com' },
-                { role: 'Assessor',   bg: 'rgba(77,184,138,.14)', fg: '#0f8a4b',  email: 'assessor@nudj.com' },
-                { role: 'Respondent', bg: 'rgba(232,148,26,.14)', fg: '#b46a10',  email: 'respondent@nudj.com' },
+                { role: 'Admin',      bg: 'rgba(19,180,207,.12)', fg: '#0c7689',  email: 'admin@nudj.app' },
+                { role: 'Assessor',   bg: 'rgba(77,184,138,.14)', fg: '#0f8a4b',  email: 'assessor@nudj.app' },
+                { role: 'Respondent', bg: 'rgba(232,148,26,.14)', fg: '#b46a10',  email: 'r1@nudj.app' },
               ].map(c => (
                 <div key={c.role} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ padding: '2px 7px', borderRadius: 6, fontSize: 9, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: c.bg, color: c.fg, flexShrink: 0 }}>{c.role}</span>
-                  <span>{c.email} / password123</span>
+                  <span>{c.email} / password</span>
                 </div>
               ))}
             </div>

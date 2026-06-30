@@ -15,7 +15,7 @@ import {
   SheetTitle, SheetDescription, SheetClose,
 } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
@@ -921,6 +921,7 @@ export function UserManagement() {
   const handleDownloadGroupTemplate = () => downloadBlob(generateGroupsTemplate(), 'groups_template.csv');
 
   return (
+    <TooltipProvider>
     <div className="p-8 max-w-6xl mx-auto space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -989,5 +990,6 @@ export function UserManagement() {
         />
       )}
     </div>
+    </TooltipProvider>
   );
 }

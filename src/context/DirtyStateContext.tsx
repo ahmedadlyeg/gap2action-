@@ -17,7 +17,7 @@ import { Save, Trash2 } from 'lucide-react';
 
 interface Guard {
   isDirty: () => boolean;
-  save: () => void;
+  save: () => Promise<void> | void;
 }
 
 let _guard: Guard | null = null;
@@ -52,8 +52,8 @@ export function DirtyStateProvider({ children }: { children: ReactNode }) {
     setPendingPath(path);
   }, [navigate]);
 
-  const handleSaveAndLeave = useCallback(() => {
-    _guard?.save();
+  const handleSaveAndLeave = useCallback(async () => {
+    await _guard?.save();
     if (pendingPath) navigate(pendingPath);
     setPendingPath(null);
   }, [pendingPath, navigate]);

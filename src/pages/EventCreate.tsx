@@ -123,8 +123,8 @@ export function EventCreate() {
   // Active templates for picker — deduplicated by version family
   const activeTemplatesForPicker = useMemo(() => {
     const sorted = [...allTemplates].sort((a, b) => {
-      const [aMaj = 0, aMin = 0] = a.version.split('.').map(Number);
-      const [bMaj = 0, bMin = 0] = b.version.split('.').map(Number);
+      const [aMaj = 0, aMin = 0] = (a.version ?? '0').split('.').map(Number);
+      const [bMaj = 0, bMin = 0] = (b.version ?? '0').split('.').map(Number);
       return aMaj !== bMaj ? bMaj - aMaj : bMin - aMin;
     });
     const seen = new Set<string>();

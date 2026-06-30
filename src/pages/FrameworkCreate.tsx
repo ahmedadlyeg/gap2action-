@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Scale, BarChart2, Layers, LayoutGrid, Eye, X,
-  Plus, Trash2, Star,
+  Scale, BarChart2, Layers, LayoutGrid, Eye, X, Star, Plus, Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -354,13 +353,15 @@ export function FrameworkCreate() {
           setStatus(fw.status);
           setAllowedTypes(new Set(fw.allowedQuestionTypes as QuestionType[]));
           setScoringMethod(fw.scoringMethod as ScoringMethod);
-          setLevels(fw.maturityLevels.map(l => ({
-            level: l.level,
-            label: l.label,
-            description: l.description,
-            minScore: l.minScore,
-            maxScore: l.maxScore,
-          })));
+          if (fw.maturityLevels.length > 0) {
+            setLevels(fw.maturityLevels.map(l => ({
+              level: l.level,
+              label: l.label,
+              description: l.description,
+              minScore: l.minScore,
+              maxScore: l.maxScore,
+            })));
+          }
         }
       }).catch(() => {});
     }

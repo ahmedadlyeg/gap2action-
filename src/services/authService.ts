@@ -14,13 +14,14 @@ function toUser(u: (typeof users)[0]): User {
   return { ...u } as User;
 }
 
-function apiUserToUser(u: { id: string; name: string; email: string; role: string; initials: string; departmentId?: string | null }): User {
+function apiUserToUser(u: { id: string; name: string; email: string; role: string; initials?: string | null; departmentId?: string | null }): User {
+  const initials = u.initials ?? u.name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() ?? '?';
   return {
     id: u.id,
     name: u.name,
     email: u.email,
     role: u.role as User['role'],
-    initials: u.initials,
+    initials,
     status: 'Active',
     department: u.departmentId ?? undefined,
   } as unknown as User;
@@ -31,18 +32,23 @@ export async function login(email: string, password: string): Promise<AuthResult
     const { user } = await authApi.login(email, password);
     return { success: true, user: apiUserToUser(user) };
   } catch (err) {
-    // Backend unreachable — fall back to mock auth
-    if (!(err instanceof ApiError)) {
-      const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-      if (!found) return { success: false, error: 'No account found with that email.' };
-      if (password !== 'password') return { success: false, error: 'Demo password is "password".' };
-      const mockUser = toUser(found);
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
-      return { success: true, user: mockUser };
+    if (err instanceof ApiError) {
+      if (err.status === 401) return { success: false, error: 'Invalid email or password.' };
+      if (err.status === 403) return { success: false, error: err.message };
+      return { success: false, error: 'An error occurred. Please try again.' };
     }
-    if (err.status === 401) return { success: false, error: 'Invalid email or password.' };
-    if (err.status === 403) return { success: false, error: err.message };
-    return { success: false, error: 'An error occurred. Please try again.' };
+    // 'Session expired' is thrown when login returns 401 and refresh also fails —
+    // i.e. wrong credentials (not a real session expiry on the login page).
+    if (err instanceof Error && err.message === 'Session expired') {
+      return { success: false, error: 'Invalid email or password.' };
+    }
+    // True network error — backend unreachable — fall back to mock auth
+    const found = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!found) return { success: false, error: 'No account found with that email.' };
+    if (password !== 'password') return { success: false, error: 'Demo password is "password".' };
+    const mockUser = toUser(found);
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(mockUser));
+    return { success: true, user: mockUser };
   }
 }
 

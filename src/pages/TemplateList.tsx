@@ -13,7 +13,7 @@ import {
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { templatesApi, categoriesApi, frameworksApi, type ApiTemplate, type ApiCategory, type ApiFramework } from '@/services/api';
+import { templatesApi, categoriesApi, frameworksApi, usersApi, type ApiTemplate, type ApiCategory, type ApiFramework } from '@/services/api';
 import type { TemplateStatus } from '@/types';
 
 type Template = ApiTemplate & { questionCount?: number };
@@ -39,15 +39,16 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function userName(id: string) {
-  return id; // users resolved from API in a future improvement
+function userName(id: string, usersMap: Record<string, string>) {
+  return usersMap[id] ?? '—';
 }
 
 function genCode(name: string, existingCodes: string[]) {
-  const base = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 4);
-  let code = `${base}-v1`;
-  let i = 2;
-  while (existingCodes.includes(code)) { code = `${base}-v${i++}`; }
+  const base = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 4) || 'TPL';
+  const rand = () => Math.random().toString(36).slice(2, 6).toUpperCase();
+  let code = `${base}-${rand()}`;
+  // Regenerate on the rare chance of a local collision
+  while (existingCodes.includes(code)) { code = `${base}-${rand()}`; }
   return code;
 }
 
@@ -75,15 +76,25 @@ export function TemplateList() {
     (location.state as { category?: Category })?.category
   );
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [usersMap, setUsersMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     try {
-      const [tpls, cat] = await Promise.all([
+      const [tpls, cat, users] = await Promise.all([
         templatesApi.list(id),
         category ? Promise.resolve(category) : categoriesApi.get(id ?? '').catch(() => undefined),
+        usersApi.list().catch(() => []),
       ]);
-      setTemplates(tpls);
+      // Build userId → name lookup
+      const map: Record<string, string> = {};
+      users.forEach(u => { map[u.id] = u.name; });
+      setUsersMap(map);
+      // Compute question count from sections returned by the API
+      setTemplates(tpls.map(t => ({
+        ...t,
+        questionCount: t.sections?.reduce((sum, sec) => sum + sec.questions.length, 0) ?? 0,
+      })));
       if (!category && cat) setCategory(cat);
     } finally {
       setLoading(false);
@@ -170,7 +181,9 @@ export function TemplateList() {
   };
 
   const handleClone = async (tpl: Template) => {
-    await templatesApi.create({
+    // Fetch full source template to get sections + questions
+    const source = await templatesApi.get(tpl.id);
+    const cloned = await templatesApi.create({
       categoryId: id!,
       name: `${tpl.name} (Copy)`,
       code: genCode(`${tpl.name} Copy`, templates.map(t => t.code)),
@@ -180,6 +193,19 @@ export function TemplateList() {
       status: 'Draft',
       frameworkId: tpl.frameworkId,
     });
+    // Copy sections with fresh IDs so they're independent of the source
+    if (source.sections && source.sections.length > 0) {
+      const copiedSections = source.sections.map(s => ({
+        ...s,
+        id: crypto.randomUUID(),
+        questions: s.questions.map(q => ({
+          ...q,
+          id: crypto.randomUUID(),
+          options: q.options.map(o => ({ ...o, id: crypto.randomUUID() })),
+        })),
+      }));
+      await templatesApi.saveSections(cloned.id, copiedSections);
+    }
     await reload();
   };
 
@@ -329,7 +355,7 @@ export function TemplateList() {
                           </td>
                           {/* Created by */}
                           <td className="px-5 py-3.5 text-xs text-muted-foreground hidden lg:table-cell">
-                            {userName((primary as unknown as { createdBy?: string }).createdBy ?? '')}
+                            {userName(primary.createdBy ?? '', usersMap)}
                           </td>
                           {/* Last modified */}
                           <td className="px-5 py-3.5 text-xs text-muted-foreground hidden lg:table-cell">

@@ -14,7 +14,7 @@ import {
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
 import { getEvent, getTemplateSections, saveSubmission, getReturnFeedback, saveRespondentAction, getRespondentAction } from '@/services/store';
-import { eventsApi, submissionsApi, type ApiEvent } from '@/services/api';
+import { eventsApi, submissionsApi, templatesApi, type ApiEvent, type ApiTemplate } from '@/services/api';
 import { cn } from '@/lib/utils';
 import { scoreAnswer } from '@/utils/scoring';
 
@@ -810,13 +810,17 @@ function buildSections(eventId: string | undefined): QuestionnaireSection[] {
 export function Questionnaire() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
+  const { pathname } = window.location;
   const navigate = useNavigate();
   const { user } = useAuth();
-  const isPreview = searchParams.get('mode') === 'preview';
+  // isPreview: explicit query param OR the /templates/:id/preview route (path ends with /preview)
+  const isPreview = searchParams.get('mode') === 'preview' || pathname.endsWith('/preview');
   const userId = user?.id ?? 'u1';
 
   // ── API data ──
   const [apiEvent, setApiEvent] = useState<ApiEvent | null>(null);
+  // Populated when accessed via /templates/:id/preview (no event exists yet)
+  const [templatePreview, setTemplatePreview] = useState<ApiTemplate | null>(null);
   const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
@@ -837,41 +841,65 @@ export function Questionnaire() {
         if (sub && (sub as unknown as { status?: string }).status === 'Returned_for_Revision') {
           setIsRevisionMode(true);
         }
+        setLoadingData(false);
       })
       .catch(() => {
-        // Fallback: try store for offline/dev
-        const storeEvent = getEvent(id);
-        if (storeEvent) setApiEvent(storeEvent as unknown as ApiEvent);
-      })
-      .finally(() => setLoadingData(false));
-  }, [id, userId]);
+        // id may be a template ID (preview from TemplateBuilder) — try loading it as a template
+        if (isPreview) {
+          templatesApi.get(id)
+            .then(tpl => setTemplatePreview(tpl))
+            .catch(() => {
+              // Final fallback: store
+              const storeEvent = getEvent(id);
+              if (storeEvent) setApiEvent(storeEvent as unknown as ApiEvent);
+            })
+            .finally(() => setLoadingData(false));
+        } else {
+          // Normal event fallback: try store for offline/dev
+          const storeEvent = getEvent(id);
+          if (storeEvent) setApiEvent(storeEvent as unknown as ApiEvent);
+          setLoadingData(false);
+        }
+      });
+  }, [id, userId, isPreview]);
 
-  // Derive sections from API event (template.sections) or store fallback
-  const sections: QuestionnaireSection[] = apiEvent?.template?.sections
-    ? apiEvent.template.sections.map(sec => ({
-        id: sec.id,
-        name: sec.name,
-        description: sec.description,
-        questions: sec.questions.map(q => ({
-          id: q.id,
-          text: q.text,
-          guidance: q.guidance || undefined,
-          type: q.type as QuestionnaireQuestion['type'],
-          required: q.required,
-          options: (q.type === 'single-choice' || q.type === 'multi-choice')
-            ? q.options.map(o => ({ id: o.id, text: o.text }))
-            : undefined,
-          minLabel: q.minLabel || undefined,
-          maxLabel: q.maxLabel || undefined,
-        })),
-      }))
-    : buildSections(id);
+  // Sections source priority:
+  //  1. Event template sections (event-based questionnaire)
+  //  2. Direct template API sections (template preview with saved sections)
+  //  3. Local store sections (template preview, unsaved or API race)
+  //  4. buildSections fallback (event-based offline/mock)
+  const apiSections = apiEvent?.template?.sections ?? (templatePreview?.sections?.length ? templatePreview.sections : null);
+  // For template preview, also check local store — covers unsaved builder changes and API race
+  const localStoreSections = (!apiEvent && isPreview && id) ? getTemplateSections(id) : null;
+  const rawSections = apiSections ?? localStoreSections ?? null;
+
+  function mapSections(raw: any[]): QuestionnaireSection[] {
+    return raw.map(sec => ({
+      id: sec.id,
+      name: sec.name,
+      description: sec.description,
+      questions: sec.questions.map((q: any) => ({
+        id: q.id,
+        text: q.text,
+        guidance: q.guidance || undefined,
+        type: q.type as QuestionnaireQuestion['type'],
+        required: q.required,
+        options: (q.type === 'single-choice' || q.type === 'multi-choice')
+          ? q.options.map((o: any) => ({ id: o.id, text: o.text }))
+          : undefined,
+        minLabel: q.minLabel || undefined,
+        maxLabel: q.maxLabel || undefined,
+      })),
+    }));
+  }
+
+  const sections: QuestionnaireSection[] = rawSections ? mapSections(rawSections) : buildSections(id);
 
   // Section assignment — all visible for now (per-user assignment is a future feature)
   const visibleSections = sections;
 
-  // Template cover data
-  const cover = apiEvent?.template;
+  // Template cover data (works for both event-based and direct template preview)
+  const cover = apiEvent?.template ?? templatePreview;
   const hasCover = !!(cover?.tagline || cover?.definition || cover?.coverImageUrl || cover?.explanation);
 
   const storageKey = `g2a-questionnaire-${id}`;
@@ -1039,7 +1067,7 @@ export function Questionnaire() {
   const allComplete = visibleSections.every(s => s.questions.every(q => isAnswered(q, answers)));
   const isLast = currentIdx === visibleSections.length - 1;
   const isFirst = currentIdx === 0;
-  const eventName = event?.name ?? 'Assessment';
+  const eventName = event?.name ?? templatePreview?.name ?? 'Assessment';
   const dueDate = event?.endDate
     ? new Date(event.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
     : '—';

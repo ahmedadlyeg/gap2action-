@@ -1,17 +1,12 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { Download, Info, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { UserAvatar } from '@/components/ui/avatar';
 import { buildEventResults } from '@/utils/scoring';
-import { getUsers } from '@/services/store';
+import { usersApi, type ApiUser } from '@/services/api';
 import type { AssessmentEvent, Template } from '@/types';
 import { cn } from '@/lib/utils';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function userName(uid: string) { return getUsers().find(u => u.id === uid)?.name ?? uid; }
-function userInitials(uid: string) { return getUsers().find(u => u.id === uid)?.initials ?? '??'; }
 
 function scoreCellCls(score: number | null): string {
   if (score === null) return 'bg-muted/40 text-muted-foreground';
@@ -137,7 +132,7 @@ function SectionBarChart({ sections, maxScore }: {
 
 // ─── Comparison Table ─────────────────────────────────────────────────────────
 
-function ComparisonTable({ respondentIds, sections }: {
+function ComparisonTable({ respondentIds, sections, users }: {
   respondentIds: string[];
   sections: Array<{ id: string; name: string; questions: Array<{
     id: string; text: string; type: 'scored' | 'text';
@@ -145,7 +140,10 @@ function ComparisonTable({ respondentIds, sections }: {
     respondentLabels: Record<string, string>;
     averageScore: number | null;
   }> }>;
+  users: ApiUser[];
 }) {
+  function userName(uid: string) { return users.find(u => u.id === uid)?.name ?? uid; }
+  function userInitials(uid: string) { return users.find(u => u.id === uid)?.initials ?? '??'; }
   return (
     <div className="overflow-x-auto rounded-xl border">
       <table className="min-w-max border-collapse text-xs">
@@ -235,9 +233,14 @@ interface ResultsTabProps {
 
 export function ResultsTab({ event, template }: ResultsTabProps) {
   const [showExport, setShowExport] = useState(false);
+  const [users, setUsers] = useState<ApiUser[]>([]);
   const data = buildEventResults(event);
   const isClosed = event.status === 'Completed' || event.status === 'Closed';
   const MAX_SCORE = 5;
+
+  useEffect(() => {
+    usersApi.list().then(setUsers).catch(() => {});
+  }, []);
 
   const handleExport = () => {
     setShowExport(true);
@@ -348,6 +351,7 @@ export function ResultsTab({ event, template }: ResultsTabProps) {
               ...s,
               questions: s.questions,
             }))}
+            users={users}
           />
 
           {/* Score color legend */}

@@ -79,8 +79,11 @@ export interface AuthUser {
 }
 
 export const authApi = {
+  // noRedirect=true: a 401 on login means wrong credentials, NOT a session
+  // expiry. Without this, the request wrapper would call window.location.href
+  // and silently reload the page instead of showing an error message.
   login: (email: string, password: string) =>
-    api.post<{ user: AuthUser }>('/auth/login', { email, password }),
+    request<{ user: AuthUser }>('POST', '/auth/login', { email, password }, false, true),
   logout: () => api.post<void>('/auth/logout'),
   refresh: () => api.post<void>('/auth/refresh'),
   // noRedirect=true: getMe is called on every page load to check session;
@@ -159,6 +162,7 @@ export interface ApiTemplate {
   frameworkId?: string;
   framework?: { id: string; name: string };
   sections?: ApiSection[];
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -422,7 +426,7 @@ export interface ApiTask {
   updatedAt: string;}
 
 export const tasksApi = {
-  list: (eventId: string) => api.get<ApiTask[]>(`/tasks?eventId=${eventId}`),
+  list: (eventId?: string) => api.get<ApiTask[]>(`/tasks${eventId ? `?eventId=${eventId}` : ''}`),
   get: (id: string) => api.get<ApiTask>(`/tasks/${id}`),
   create: (data: Partial<ApiTask>) => api.post<ApiTask>('/tasks', data),
   update: (id: string, data: Partial<ApiTask>) => api.patch<ApiTask>(`/tasks/${id}`, data),

@@ -14,8 +14,29 @@ import {
 } from '@/components/ui/dialog';
 import { users } from '@/services/mockData';
 import type { AssessmentEvent, Task, TaskEffort } from '@/types';
-import { getEventTasks, saveTask as storeSaveTask, deleteTask as storeDeleteTask } from '@/services/store';
+import { tasksApi, usersApi, type ApiTask, type ApiUser } from '@/services/api';
 import { cn } from '@/lib/utils';
+
+// Status mapping helpers
+function toFrontendStatus(s: string): Task['status'] {
+  return s.replace('_', ' ') as Task['status'];
+}
+function toApiStatus(s: string): ApiTask['status'] {
+  return s.replace(' ', '_') as ApiTask['status'];
+}
+function apiTaskToTask(t: ApiTask): Task {
+  const recName = t.recName ?? '';
+  return {
+    id: t.id, eventId: t.eventId, title: t.title, description: t.description,
+    progressNotes: t.progressNotes,
+    recId: t.recommendationId ?? `rec-${recName.replace(/\s+/g, '-').toLowerCase()}`,
+    recName,
+    gapWeight: t.gapWeight ?? 0, status: toFrontendStatus(t.status),
+    effort: t.effort, assigneeId: t.assigneeId, priority: t.priority,
+    startDate: t.startDate ?? '', dueDate: t.dueDate ?? '',
+    dependsOn: [], completionPct: t.completionPct, createdAt: t.createdAt,
+  } as unknown as Task;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,8 +89,9 @@ const AI_SUGGESTIONS: Record<string, Array<{ title: string; effort: Effort }>> =
 
 function parseDate(iso: string): Date { return new Date(iso + 'T00:00:00'); }
 function daysBetween(a: Date, b: Date): number { return Math.round((b.getTime() - a.getTime()) / 86400000); }
-function userName(uid?: string) { return uid ? (users.find(u => u.id === uid)?.name ?? uid) : '—'; }
-function userInitials(uid?: string) { return uid ? (users.find(u => u.id === uid)?.initials ?? '?') : ''; }
+// These are used only for Gantt bar display; TaskDetailSheet uses API users instead
+function userName(uid?: string) { return uid ? (users.find(u => u.id === uid)?.name ?? uid.slice(0, 6)) : '—'; }
+function userInitials(uid?: string) { return uid ? (users.find(u => u.id === uid)?.initials ?? uid.slice(0, 2).toUpperCase()) : ''; }
 
 function isOverdue(task: GanttTask): boolean {
   return task.status !== 'Done' && task.status !== 'Blocked' && parseDate(task.dueDate) < new Date();
@@ -445,11 +467,14 @@ function GanttChart({ tasks, groups, onTaskClick }: GanttChartProps) {
 interface TaskDetailSheetProps {
   task: GanttTask | null;
   allTasks: GanttTask[];
+  users: ApiUser[];
   onClose: () => void;
   onSave: (updated: GanttTask) => void;
 }
 
-function TaskDetailSheet({ task, allTasks, onClose, onSave }: TaskDetailSheetProps) {
+function TaskDetailSheet({ task, allTasks, users: sheetUsers, onClose, onSave }: TaskDetailSheetProps) {
+  function userName(uid?: string) { return uid ? (sheetUsers.find(u => u.id === uid)?.name ?? uid) : '—'; }
+  function userInitials(uid?: string) { return uid ? (sheetUsers.find(u => u.id === uid)?.initials ?? '?') : ''; }
   const [draft, setDraft] = useState<GanttTask | null>(null);
 
   useEffect(() => { setDraft(task ? { ...task } : null); }, [task]);
@@ -543,7 +568,7 @@ function TaskDetailSheet({ task, allTasks, onClose, onSave }: TaskDetailSheetPro
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             >
               <option value="">No owner</option>
-              {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              {sheetUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
             {draft.assigneeId && (
               <div className="flex items-center gap-2 mt-2">
@@ -827,20 +852,27 @@ const GROUP_COLORS = ['#8b5cf6', '#3b82f6', '#14b8a6', '#f59e0b', '#ef4444', '#1
 
 export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: RoadmapTabProps) {
   const { toast } = useToast();
-  const [tasks, setTasks] = useState<GanttTask[]>(() => {
-    const stored = getEventTasks(event.id);
-    return stored.length > 0 ? stored : [];
-  });
+  const [tasks, setTasks] = useState<GanttTask[]>([]);
+  const [apiUsers, setApiUsers] = useState<ApiUser[]>([]);
   const [openTask, setOpenTask]   = useState<GanttTask | null>(null);
   const [aiModal, setAiModal]     = useState<{ recName: string; recId: string; gapWeight: number } | null>(null);
 
-  // Build groups dynamically from stored tasks — no hardcoding
+  // Load tasks from API
+  useEffect(() => {
+    tasksApi.list(event.id)
+      .then(ts => setTasks(ts.map(apiTaskToTask)))
+      .catch(() => {});
+    usersApi.list().then(setApiUsers).catch(() => {});
+  }, [event.id]);
+
+  // Build groups dynamically from tasks
   const recGroups: RecGroup[] = useMemo(() => {
     const seen = new Map<string, RecGroup>();
     tasks.forEach(t => {
-      if (!seen.has(t.recId)) {
-        seen.set(t.recId, {
-          recId: t.recId,
+      const key = t.recName || t.recId;
+      if (!seen.has(key)) {
+        seen.set(key, {
+          recId: t.recId || `rec-${key}`,
           recName: t.recName,
           gapWeight: t.gapWeight,
           color: GROUP_COLORS[seen.size % GROUP_COLORS.length],
@@ -850,23 +882,12 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
     return Array.from(seen.values());
   }, [tasks]);
 
-  // Reload tasks from store when another tab writes new ones
-  useEffect(() => {
-    const handler = () => {
-      setTasks(getEventTasks(event.id));
-    };
-    window.addEventListener('g2a-store-updated', handler);
-    return () => window.removeEventListener('g2a-store-updated', handler);
-  }, [event.id]);
-
   // Auto-open AI modal when arriving from Recommendations
   const consumedRef = useRef(false);
   useEffect(() => {
     if (pendingRecName && !consumedRef.current) {
       consumedRef.current = true;
       onPendingConsumed?.();
-      // Tasks were already created by "Convert to Tasks" — no need to open modal
-      // Only open modal if no tasks exist for this rec name
       const hasExisting = tasks.some(t => t.recName === pendingRecName);
       if (!hasExisting) {
         const group = recGroups.find(g => g.recName === pendingRecName)
@@ -879,16 +900,42 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
   }, [pendingRecName, onPendingConsumed, tasks, recGroups]);
 
   function saveTask(updated: GanttTask) {
-    storeDeleteTask(updated.id); // remove first to ensure clean upsert
-    storeSaveTask(updated);
+    tasksApi.update(updated.id, {
+      title: updated.title,
+      description: updated.description,
+      progressNotes: updated.progressNotes,
+      status: toApiStatus(updated.status),
+      effort: updated.effort,
+      assigneeId: updated.assigneeId,
+      startDate: updated.startDate,
+      dueDate: updated.dueDate,
+    }).catch(() => {});
     setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
     toast({ title: 'Task saved', variant: 'success' });
   }
 
   function addTasks(newTasks: GanttTask[]) {
-    newTasks.forEach(t => storeDeleteTask(t.id));
-    newTasks.forEach(t => storeSaveTask(t));
-    setTasks(prev => [...prev, ...newTasks]);
+    const today = new Date().toISOString().slice(0, 10);
+    const defaultDue = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    Promise.all(newTasks.map(t =>
+      tasksApi.create({
+        eventId: t.eventId,
+        title: t.title,
+        description: t.description,
+        progressNotes: t.progressNotes,
+        recName: t.recName,
+        gapWeight: t.gapWeight,
+        status: toApiStatus(t.status),
+        effort: t.effort,
+        priority: t.priority,
+        startDate: t.startDate || today,
+        dueDate: t.dueDate || defaultDue,
+        completionPct: t.completionPct,
+        assigneeId: t.assigneeId,
+      }).then(apiTaskToTask)
+    ))
+    .then(created => setTasks(prev => [...prev, ...created]))
+    .catch(() => { setTasks(prev => [...prev, ...newTasks]); });
     toast({
       title: `${newTasks.length} task${newTasks.length !== 1 ? 's' : ''} added to roadmap`,
       variant: 'success',
@@ -976,6 +1023,7 @@ export function RoadmapTab({ event, pendingRecName, onPendingConsumed }: Roadmap
       <TaskDetailSheet
         task={openTask}
         allTasks={tasks}
+        users={apiUsers}
         onClose={() => setOpenTask(null)}
         onSave={saveTask}
       />

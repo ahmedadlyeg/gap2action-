@@ -799,7 +799,7 @@ export function EventDashboard() {
                                       className="h-7 w-7 text-muted-foreground hover:text-primary"
                                       asChild
                                     >
-                                      <a href={`/questionnaire/${event.id}?mode=preview`} target="_blank" rel="noreferrer">
+                                      <a href={`${import.meta.env.BASE_URL}events/${event.id}/questionnaire?mode=preview`} target="_blank" rel="noreferrer">
                                         <FileText size={14} />
                                       </a>
                                     </Button>

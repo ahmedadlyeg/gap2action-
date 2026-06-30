@@ -8,8 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { getEvents, getTemplates, getCategories } from '@/services/store';
-import type { AssessmentEvent, Template, Category } from '@/types';
+import { eventsApi, templatesApi, categoriesApi, type ApiEvent, type ApiTemplate, type ApiCategory } from '@/services/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,9 +17,9 @@ type SortKey = 'name' | 'template' | 'category' | 'completion' | 'score' | 'stat
 type SortDir = 'asc' | 'desc';
 
 interface ReportRow {
-  event: AssessmentEvent;
-  template: Template | undefined;
-  category: Category | undefined;
+  event: ApiEvent;
+  template: ApiTemplate | undefined;
+  category: ApiCategory | undefined;
   completionPct: number;
   respondentCount: number;
   submittedCount: number;
@@ -62,7 +61,7 @@ function exportCSV(rows: ReportRow[]) {
     r.submittedCount,
     r.validatedCount,
     r.completionPct,
-    r.event.score ?? '',
+    r.event.score != null ? r.event.score.toFixed(1) : '',
     `"${r.event.maturityLevel ?? ''}"`,
     fmt(r.event.startDate),
     fmt(r.event.endDate),
@@ -133,39 +132,24 @@ export function Reports() {
   const [rows, setRows] = useState<ReportRow[]>([]);
 
   useEffect(() => {
-    const events    = getEvents();
-    const templates = getTemplates();
-    const categories = getCategories();
-
-    const built: ReportRow[] = events.map(ev => {
-      const tpl = templates.find(t => t.id === ev.templateId);
-      const cat = categories.find(c => c.id === tpl?.categoryId);
-      const respondentCount = ev.respondentProgress.length;
-      const submittedCount  = ev.respondentProgress.filter(p =>
-        p.status === 'Submitted' || p.status === 'Validated'
-      ).length;
-      const validatedCount  = ev.respondentProgress.filter(p => p.status === 'Validated').length;
-      const completionPct   = respondentCount > 0
-        ? Math.round(submittedCount / respondentCount * 100)
-        : 0;
-      return { event: ev, template: tpl, category: cat, completionPct, respondentCount, submittedCount, validatedCount };
-    });
-
-    setRows(built);
-
-    const handler = () => {
-      const evs2 = getEvents();
-      setRows(evs2.map(ev => {
-        const tpl = templates.find(t => t.id === ev.templateId);
-        const cat = categories.find(c => c.id === tpl?.categoryId);
-        const rc  = ev.respondentProgress.length;
-        const sc  = ev.respondentProgress.filter(p => p.status === 'Submitted' || p.status === 'Validated').length;
-        const vc  = ev.respondentProgress.filter(p => p.status === 'Validated').length;
-        return { event: ev, template: tpl, category: cat, completionPct: rc > 0 ? Math.round(sc / rc * 100) : 0, respondentCount: rc, submittedCount: sc, validatedCount: vc };
-      }));
-    };
-    window.addEventListener('g2a-store-updated', handler);
-    return () => window.removeEventListener('g2a-store-updated', handler);
+    Promise.all([eventsApi.list(), templatesApi.list(), categoriesApi.list()])
+      .then(([events, templates, categories]) => {
+        const buildRows = (evs: ApiEvent[]) => evs.map(ev => {
+          const tpl = templates.find(t => t.id === ev.templateId);
+          const cat = categories.find(c => c.id === tpl?.categoryId);
+          const respondentCount = ev.respondents.length;
+          const submittedCount  = ev.respondents.filter(p =>
+            p.status === 'Submitted' || p.status === 'Validated'
+          ).length;
+          const validatedCount  = ev.respondents.filter(p => p.status === 'Validated').length;
+          const completionPct   = respondentCount > 0
+            ? Math.round(submittedCount / respondentCount * 100)
+            : Math.round(ev.completionRate ?? 0);
+          return { event: ev, template: tpl, category: cat, completionPct, respondentCount, submittedCount, validatedCount };
+        });
+        setRows(buildRows(events));
+      })
+      .catch(() => {});
   }, []);
 
   // Filter

@@ -11,7 +11,7 @@ import { useToast } from '@/context/ToastContext';
 import type { AssessmentEvent, EventRec, RecConvMessage, RecStatus, Task, TaskEffort } from '@/types';
 import { resultsByEventId } from '@/services/resultsMockData';
 import { buildEventResults } from '@/utils/scoring';
-import { getEventRecommendations, saveEventRecommendations, saveTask as storeSaveTask, getEventTasks } from '@/services/store';
+import { recommendationsApi, tasksApi } from '@/services/api';
 import { cn } from '@/lib/utils';
 
 // ─── Mock recommendation data ─────────────────────────────────────────────────
@@ -257,25 +257,27 @@ function RecCard({ rec, eventId, onUpdate, onNavigateRoadmap }: RecCardProps) {
   function approve() {
     if (editMode) saveEdit();
     onUpdate(rec.id, { status: 'Approved' });
+    recommendationsApi.update(rec.id, { status: 'Approved' }).catch(() => {});
     toast({ title: 'Recommendation approved', variant: 'success' });
   }
 
   function markNoted() {
     onUpdate(rec.id, { status: 'Noted' });
+    recommendationsApi.update(rec.id, { status: 'Noted' }).catch(() => {});
     toast({ title: 'Recommendation noted', variant: 'default' });
   }
 
-  function convertToTasks() {
-    // Don't create duplicates if tasks already exist for this rec
-    const existing = getEventTasks(eventId).filter(t => t.recName === rec.sectionName);
-    if (existing.length > 0) {
+  async function convertToTasks() {
+    // Check if tasks already exist for this rec via API
+    const existing = await tasksApi.list(eventId).catch(() => [] as import('@/services/api').ApiTask[]);
+    if (existing.some(t => t.recName === rec.sectionName)) {
       onUpdate(rec.id, { status: 'Converted' });
+      recommendationsApi.update(rec.id, { status: 'Converted' }).catch(() => {});
       toast({ title: 'Tasks already exist in Roadmap', description: 'Switching to Roadmap tab…', variant: 'default' });
       onNavigateRoadmap?.();
       return;
     }
 
-    const recId = `rec-${rec.id}`;
     const today = new Date().toISOString().slice(0, 10);
     const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
@@ -287,30 +289,27 @@ function RecCard({ rec, eventId, onUpdate, onNavigateRoadmap }: RecCardProps) {
       { title: `Review and validate progress: ${rec.sectionName}`, effort: 'Medium' },
     ];
 
-    const newTasks: Task[] = taskTitles.map(item => ({
-      id: `${recId}-${crypto.randomUUID()}`,
-      eventId,
-      title: item.title,
-      description: rec.currentText.slice(0, 200),
-      progressNotes: '',
-      recId,
-      recName: rec.sectionName,
-      gapWeight: Math.abs(rec.gapMagnitude),
-      status: 'Not Started' as const,
-      effort: item.effort,
-      assigneeId: undefined,
-      priority: 'Medium' as const,
-      startDate: today,
-      dueDate,
-      dependsOn: [],
-      completionPct: 0,
-      createdAt: new Date().toISOString(),
-    }));
+    await Promise.all(taskTitles.map(item =>
+      tasksApi.create({
+        eventId,
+        title: item.title,
+        description: rec.currentText.slice(0, 200),
+        progressNotes: '',
+        recName: rec.sectionName,
+        gapWeight: Math.abs(rec.gapMagnitude),
+        status: 'Not_Started' as const,
+        effort: item.effort,
+        priority: 'Medium' as const,
+        startDate: today,
+        dueDate,
+        completionPct: 0,
+      })
+    )).catch(() => {});
 
-    newTasks.forEach(t => storeSaveTask(t));
     onUpdate(rec.id, { status: 'Converted' });
+    recommendationsApi.update(rec.id, { status: 'Converted' }).catch(() => {});
     toast({
-      title: `${newTasks.length} tasks added to Roadmap`,
+      title: `${taskTitles.length} tasks added to Roadmap`,
       description: `Tasks created for "${rec.sectionName}". Switching to Roadmap…`,
       variant: 'success',
     });
@@ -617,58 +616,92 @@ interface RecommendationsTabProps {
 }
 
 export function RecommendationsTab({ event, onNavigateRoadmap }: RecommendationsTabProps) {
-  const [recs, setRecs] = useState<EventRec[]>(() => {
-    // 1. Try store first (persisted recs)
-    const stored = getEventRecommendations(event.id);
-    if (stored.length > 0) return stored;
+  const [recs, setRecs] = useState<EventRec[]>([]);
+  const [loading, setLoading] = useState(true);
 
-    // 2. Build from real gap data
-    const data = resultsByEventId[event.id] ?? buildEventResults(event);
-    const baseRecs: EventRec[] = data
-      ? (data.sections as { id: string; name: string; achievedScore: number; targetScore: number }[])
-          .filter((s: { achievedScore: number; targetScore: number }) => s.achievedScore < s.targetScore)
-          .sort((a: { achievedScore: number; targetScore: number }, b: { achievedScore: number; targetScore: number }) => (a.achievedScore - a.targetScore) - (b.achievedScore - b.targetScore))
-          .map((s: { id: string; name: string; achievedScore: number; targetScore: number }, i: number) => {
-            const gap = s.achievedScore - s.targetScore;
-            const gapPct = Math.round(Math.abs(gap) / s.targetScore * 100);
-            const text = `Section "${s.name}" is ${Math.abs(gap).toFixed(1)} points below its target score `
-              + `(achieved ${s.achievedScore.toFixed(1)} vs target ${s.targetScore.toFixed(1)}). `
-              + `A gap of ${gapPct}% indicates this area requires focused improvement. `
-              + `Consider a structured review of current practices, identify root causes of underperformance, `
-              + `and define targeted action items with owners and timelines to close the gap within the next assessment cycle.`;
-            return {
-              id: `gen-${s.id}-${i}`,
-              eventId: event.id,
-              sectionName: s.name,
-              gapMagnitude: gap,
-              status: 'AI Draft' as const,
-              originalText: text,
-              currentText: text,
-              conversation: [],
-            };
-          })
-      : INITIAL_RECS.map(r => ({ ...r, eventId: event.id }));
-
-    const sorted = (baseRecs.length > 0 ? baseRecs : INITIAL_RECS.map(r => ({ ...r, eventId: event.id })))
-      .sort((a, b) => {
-        if (a.status === 'Approved' && b.status !== 'Approved') return -1;
-        if (b.status === 'Approved' && a.status !== 'Approved') return 1;
-        return a.gapMagnitude - b.gapMagnitude;
-      });
-    return sorted;
-  });
+  useEffect(() => {
+    // Try loading from API first
+    recommendationsApi.list(event.id)
+      .then(apiRecs => {
+        if (apiRecs.length > 0) {
+          const mapped: EventRec[] = apiRecs.map(r => ({
+            id: r.id,
+            eventId: r.eventId,
+            sectionName: r.sectionName,
+            gapMagnitude: r.gapMagnitude,
+            status: r.status as RecStatus,
+            originalText: r.originalText,
+            currentText: r.currentText,
+            conversation: r.messages.map(m => ({
+              id: m.id,
+              role: m.role as 'assessor' | 'ai',
+              text: m.text,
+            })),
+          })).sort((a, b) => {
+            if (a.status === 'Approved' && b.status !== 'Approved') return -1;
+            if (b.status === 'Approved' && a.status !== 'Approved') return 1;
+            return a.gapMagnitude - b.gapMagnitude;
+          });
+          setRecs(mapped);
+        } else {
+          // Generate from gap data if none exist
+          recommendationsApi.generate(event.id)
+            .then(generated => {
+              const mapped: EventRec[] = generated.map(r => ({
+                id: r.id, eventId: r.eventId, sectionName: r.sectionName,
+                gapMagnitude: r.gapMagnitude, status: r.status as RecStatus,
+                originalText: r.originalText, currentText: r.currentText,
+                conversation: [],
+              })).sort((a, b) => a.gapMagnitude - b.gapMagnitude);
+              setRecs(mapped);
+            })
+            .catch(() => {
+              // Fallback to mock data
+              const data = resultsByEventId[event.id] ?? buildEventResults(event);
+              const baseRecs = data
+                ? (data.sections as { id: string; name: string; achievedScore: number; targetScore: number }[])
+                    .filter(s => s.achievedScore < s.targetScore)
+                    .sort((a, b) => (a.achievedScore - a.targetScore) - (b.achievedScore - b.targetScore))
+                    .map((s, i) => {
+                      const gap = s.achievedScore - s.targetScore;
+                      const gapPct = Math.round(Math.abs(gap) / s.targetScore * 100);
+                      const text = `Section "${s.name}" is ${Math.abs(gap).toFixed(1)} points below target. A gap of ${gapPct}% requires focused improvement.`;
+                      return { id: `gen-${s.id}-${i}`, eventId: event.id, sectionName: s.name, gapMagnitude: gap, status: 'AI Draft' as const, originalText: text, currentText: text, conversation: [] };
+                    })
+                : INITIAL_RECS.map(r => ({ ...r, eventId: event.id }));
+              setRecs((baseRecs.length > 0 ? baseRecs : INITIAL_RECS.map(r => ({ ...r, eventId: event.id })))
+                .sort((a, b) => a.gapMagnitude - b.gapMagnitude));
+            });
+        }
+      })
+      .catch(() => setRecs(INITIAL_RECS.map(r => ({ ...r, eventId: event.id }))))
+      .finally(() => setLoading(false));
+  }, [event.id]);
 
   function updateRec(id: string, changes: Partial<EventRec>) {
-    setRecs(prev => {
-      const updated = prev.map(r => r.id === id ? { ...r, ...changes } : r)
+    setRecs(prev =>
+      prev.map(r => r.id === id ? { ...r, ...changes } : r)
         .sort((a, b) => {
           if (a.status === 'Approved' && b.status !== 'Approved') return -1;
           if (b.status === 'Approved' && a.status !== 'Approved') return 1;
           return a.gapMagnitude - b.gapMagnitude;
-        });
-      saveEventRecommendations(event.id, updated);
-      return updated;
-    });
+        })
+    );
+    // Persist text/status changes
+    const apiChanges: Record<string, unknown> = {};
+    if (changes.status) apiChanges.status = changes.status;
+    if (changes.currentText) apiChanges.currentText = changes.currentText;
+    if (Object.keys(apiChanges).length > 0) {
+      recommendationsApi.update(id, apiChanges).catch(() => {});
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={28} className="animate-spin text-primary" />
+      </div>
+    );
   }
 
   const approvedCount = recs.filter(r => r.status === 'Approved' || r.status === 'Converted').length;

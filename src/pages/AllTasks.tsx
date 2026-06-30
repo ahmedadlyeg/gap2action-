@@ -6,9 +6,28 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { UserAvatar } from '@/components/ui/avatar';
-import { getTasks, getEvents, getUsers, updateTask } from '@/services/store';
+import { eventsApi, tasksApi, usersApi, type ApiTask, type ApiUser, type ApiEvent } from '@/services/api';
 import type { Task, TaskStatus } from '@/types';
 import { cn } from '@/lib/utils';
+
+function toFrontendStatus(s: string): TaskStatus {
+  return s.replace('_', ' ') as TaskStatus;
+}
+
+function toApiStatus(s: TaskStatus): string {
+  return s.replace(' ', '_');
+}
+
+function apiTaskToTask(t: ApiTask): Task {
+  return {
+    id: t.id, eventId: t.eventId, title: t.title, description: t.description,
+    progressNotes: t.progressNotes, recName: t.recName ?? '', gapWeight: t.gapWeight ?? 0,
+    status: toFrontendStatus(t.status), effort: t.effort,
+    assigneeId: t.assigneeId, priority: t.priority,
+    startDate: t.startDate ?? '', dueDate: t.dueDate ?? '',
+    dependsOn: [], completionPct: t.completionPct, createdAt: t.createdAt,
+  } as unknown as Task;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -82,7 +101,7 @@ function EventGroup({
   eventId: string;
   eventName: string;
   tasks: Task[];
-  users: ReturnType<typeof getUsers>;
+  users: ApiUser[];
   onStatusChange: (taskId: string, s: TaskStatus) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -204,21 +223,19 @@ function EventGroup({
 
 export function AllTasks() {
   const [tasks, setTasks]       = useState<Task[]>([]);
+  const [events, setEvents]     = useState<ApiEvent[]>([]);
+  const [users, setUsers]       = useState<ApiUser[]>([]);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'All'>('All');
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
-  const events  = getEvents();
-  const users   = getUsers();
 
-  // Load tasks + re-read on store updates
   useEffect(() => {
-    const load = () => setTasks(getTasks());
-    load();
-    window.addEventListener('g2a-store-updated', load);
-    return () => window.removeEventListener('g2a-store-updated', load);
+    tasksApi.list().then(ts => setTasks(ts.map(apiTaskToTask))).catch(() => {});
+    eventsApi.list().then(setEvents).catch(() => {});
+    usersApi.list().then(setUsers).catch(() => {});
   }, []);
 
   const handleStatusChange = (taskId: string, status: TaskStatus) => {
-    updateTask(taskId, { status });
+    tasksApi.update(taskId, { status: toApiStatus(status) as ApiTask['status'] }).catch(() => {});
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status } : t));
   };
 
@@ -233,6 +250,7 @@ export function AllTasks() {
   const grouped = events
     .map(ev => ({ ev, tasks: filtered.filter(t => t.eventId === ev.id) }))
     .filter(g => g.tasks.length > 0);
+
 
   // Summary counts
   const total   = tasks.length;
@@ -301,7 +319,7 @@ export function AllTasks() {
             className="ml-auto rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
           >
             <option value="all">All assignees</option>
-            {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            {users.map((u: ApiUser) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
         </div>
 

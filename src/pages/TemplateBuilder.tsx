@@ -28,6 +28,7 @@ import {
   DialogTitle, DialogDescription, DialogClose,
 } from '@/components/ui/dialog';
 import { getTemplateSections, saveTemplateSections, updateEvent as _updateEvent, getTemplateMeta, saveTemplateMeta, cloneTemplate, getTemplates, getVersionFamily, saveTemplate, getTemplate, updateTemplate, getFramework } from '@/services/store';
+import { templatesApi, frameworksApi, type ApiTemplate, type ApiSection } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import type { TemplateStatus, QuestionType, AnswerOption, BuilderQuestion, BuilderSection, Template } from '@/types';
 import { parseTemplateCSV, exportSectionsToCSV, generateCsvTemplate, type CsvImportResult } from '@/utils/csvImport';
@@ -46,6 +47,60 @@ type Selection =
   | { kind: 'cover' }
   | { kind: 'section'; sectionId: string }
   | { kind: 'question'; sectionId: string; questionId: string };
+
+// ─── API ↔ Builder conversion helpers ────────────────────────────────────────
+
+function fromApiSections(sections: ApiSection[]): BuilderSection[] {
+  return [...sections]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map(s => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      weight: 0,
+      questions: [...s.questions]
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map(q => ({
+          id: q.id,
+          sectionId: s.id,
+          text: q.text,
+          guidance: q.guidance ?? '',
+          type: q.type as QuestionType,
+          required: q.required,
+          options: [...q.options]
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+            .map(o => ({ id: o.id, text: o.text, score: o.score })),
+          minLabel: q.minLabel ?? '',
+          maxLabel: q.maxLabel ?? '',
+          ratingScores: q.ratingScores ?? [],
+          yesScore: q.yesScore ?? 0,
+          noScore: q.noScore ?? 0,
+        })),
+    }));
+}
+
+function toApiSections(sections: BuilderSection[]): ApiSection[] {
+  return sections.map((s, si) => ({
+    id: s.id,
+    name: s.name,
+    description: s.description,
+    sortOrder: si,
+    questions: s.questions.map((q, qi) => ({
+      id: q.id,
+      text: q.text,
+      guidance: q.guidance,
+      type: q.type,
+      required: q.required,
+      sortOrder: qi,
+      minLabel: q.minLabel,
+      maxLabel: q.maxLabel,
+      ratingScores: q.ratingScores,
+      yesScore: q.yesScore,
+      noScore: q.noScore,
+      options: q.options.map((o, oi) => ({ id: o.id, text: o.text, score: o.score, sortOrder: oi })),
+    })),
+  }));
+}
 
 // ─── Seed data ────────────────────────────────────────────────────────────────
 
@@ -111,8 +166,7 @@ const SEED_SECTIONS: BuilderSection[] = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-let _counter = 100;
-function uid(prefix: string) { return `${prefix}${++_counter}`; }
+function uid(_prefix?: string) { return crypto.randomUUID(); }
 
 const ALL_Q_TYPE_LABELS: Partial<Record<QuestionType, string>> = {
   'single-choice': 'Single Choice',
@@ -600,15 +654,33 @@ function QuestionForm({ question, locked, onChange, qTypeLabels = Q_TYPE_LABELS 
 
 // ─── Scoring Model Panel ──────────────────────────────────────────────────────
 
+// Level colours — cycles for >5 levels
+const LEVEL_COLOR_CLASSES = [
+  'bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-blue-500', 'bg-green-500',
+  'bg-purple-500', 'bg-indigo-500', 'bg-pink-500', 'bg-teal-500', 'bg-cyan-500',
+];
+
+const DEFAULT_LEVEL_LABELS = ['Initial', 'Developing', 'Defined', 'Quantitatively Managed', 'Optimising'];
+
+// Distributes the 0–100 scale evenly across N levels
+function computeMaturityRanges(n: number): { from: number; to: number }[] {
+  return Array.from({ length: n }, (_, i) => ({
+    from: Math.round((i / n) * 100),
+    to: i === n - 1 ? 100 : Math.round(((i + 1) / n) * 100) - 1,
+  }));
+}
+
 interface ScoringPanelProps {
   maturityLevels: MaturityRow[];
   targetScore: number;
   locked: boolean;
   onChangeLevel: (id: string, patch: Partial<MaturityRow>) => void;
   onChangeTarget: (v: number) => void;
+  onAddLevel: () => void;
+  onRemoveLevel: (id: string) => void;
 }
 
-function ScoringPanel({ maturityLevels, targetScore, locked, onChangeLevel, onChangeTarget }: ScoringPanelProps) {
+function ScoringPanel({ maturityLevels, targetScore, locked, onChangeLevel, onChangeTarget, onAddLevel, onRemoveLevel }: ScoringPanelProps) {
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-2 pb-3 border-b">
@@ -638,65 +710,57 @@ function ScoringPanel({ maturityLevels, targetScore, locked, onChangeLevel, onCh
       </div>
 
       <div className="space-y-2">
-        <Label>Maturity Levels</Label>
-        <div className="rounded-lg border overflow-hidden">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-muted/40 border-b">
-                <th className="px-3 py-2.5 text-left text-muted-foreground font-medium w-8">#</th>
-                <th className="px-3 py-2.5 text-left text-muted-foreground font-medium">Level Name</th>
-                <th className="px-3 py-2.5 text-right text-muted-foreground font-medium w-16">From</th>
-                <th className="px-3 py-2.5 text-right text-muted-foreground font-medium w-16">To</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {maturityLevels.map(row => (
-                <tr key={row.id} className="group">
-                  <td className="px-3 py-2 text-muted-foreground font-mono">{row.level}</td>
-                  <td className="px-3 py-2">
-                    <Input
-                      value={row.name}
-                      onChange={e => onChangeLevel(row.id, { name: e.target.value })}
-                      disabled={locked}
-                      className="h-7 text-xs"
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Input
-                      type="number"
-                      value={row.scoreFrom}
-                      onChange={e => onChangeLevel(row.id, { scoreFrom: Number(e.target.value) })}
-                      disabled={locked}
-                      className="w-14 h-7 text-xs text-center ml-auto"
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Input
-                      type="number"
-                      value={row.scoreTo}
-                      onChange={e => onChangeLevel(row.id, { scoreTo: Number(e.target.value) })}
-                      disabled={locked}
-                      className="w-14 h-7 text-xs text-center ml-auto"
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="flex items-center justify-between">
+          <Label>Maturity Levels</Label>
+          {!locked && (
+            <Button type="button" variant="outline" size="sm" onClick={onAddLevel} className="shrink-0 text-xs h-7">
+              <Plus size={12} className="mr-1" /> Add Level
+            </Button>
+          )}
         </div>
-
-        {/* Descriptions below the table */}
-        <div className="space-y-2 pt-1">
-          {maturityLevels.map(row => (
-            <div key={row.id} className="flex items-start gap-2">
-              <span className="text-[10px] text-muted-foreground font-mono mt-1.5 w-4 shrink-0">{row.level}</span>
+        <div className="space-y-2">
+          {maturityLevels.map((row, i) => (
+            <div key={row.id} className="flex items-center gap-3">
+              {/* Colored circle */}
+              <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white text-xs font-bold ${LEVEL_COLOR_CLASSES[i % LEVEL_COLOR_CLASSES.length]}`}>
+                {row.level}
+              </div>
+              {/* Label */}
+              <Input
+                value={row.name}
+                onChange={e => onChangeLevel(row.id, { name: e.target.value })}
+                disabled={locked}
+                placeholder={`Level ${row.level} label`}
+                className="w-44 shrink-0"
+              />
+              {/* Description */}
               <Input
                 value={row.description}
                 onChange={e => onChangeLevel(row.id, { description: e.target.value })}
                 disabled={locked}
                 placeholder={`Description for level ${row.level}…`}
-                className="h-7 text-xs text-muted-foreground"
+                className="flex-1"
               />
+              {/* Score range badge */}
+              <span className="shrink-0 text-xs bg-slate-100 text-slate-600 rounded-full px-2.5 py-1 font-mono whitespace-nowrap">
+                {row.scoreFrom}–{row.scoreTo}%
+              </span>
+              {/* Remove button */}
+              {!locked && (
+                <button
+                  type="button"
+                  onClick={() => onRemoveLevel(row.id)}
+                  disabled={maturityLevels.length <= 2}
+                  title={maturityLevels.length <= 2 ? 'Minimum 2 levels required' : `Remove level ${row.level}`}
+                  className={`shrink-0 flex h-6 w-6 items-center justify-center rounded-md transition-colors ${
+                    maturityLevels.length <= 2
+                      ? 'text-slate-200 cursor-not-allowed'
+                      : 'text-slate-400 hover:bg-red-50 hover:text-red-500'
+                  }`}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -707,22 +771,31 @@ function ScoringPanel({ maturityLevels, targetScore, locked, onChangeLevel, onCh
 
 // ─── Cover Panel ─────────────────────────────────────────────────────────────
 
-function CoverPanel({ templateId, locked }: { templateId: string; locked: boolean }) {
-  const tpl = getTemplate(templateId);
+function CoverPanel({ templateId, apiTemplate, onCoverUpdate, locked }: {
+  templateId: string;
+  apiTemplate: ApiTemplate | null;
+  onCoverUpdate: (patch: Partial<ApiTemplate>) => void;
+  locked: boolean;
+}) {
   const coverInputRef = useRef<HTMLInputElement>(null);
-  const [tagline, setTagline] = useState(tpl?.tagline ?? '');
-  const [definition, setDefinition] = useState(tpl?.definition ?? '');
-  const [explanation, setExplanation] = useState(tpl?.explanation ?? '');
+  const [tagline, setTagline] = useState(apiTemplate?.tagline ?? '');
+  const [definition, setDefinition] = useState(apiTemplate?.definition ?? '');
+  const [explanation, setExplanation] = useState(apiTemplate?.explanation ?? '');
 
-  // Re-sync if template updates externally (e.g. store event)
+  // Re-sync when API template arrives or changes
   useEffect(() => {
-    const t = getTemplate(templateId);
-    setTagline(t?.tagline ?? '');
-    setDefinition(t?.definition ?? '');
-    setExplanation(t?.explanation ?? '');
-  }, [templateId]);
+    if (apiTemplate) {
+      setTagline(apiTemplate.tagline ?? '');
+      setDefinition(apiTemplate.definition ?? '');
+      setExplanation(apiTemplate.explanation ?? '');
+    }
+  }, [apiTemplate?.id]);
 
-  const save = (patch: Partial<Template>) => updateTemplate(templateId, patch);
+  const save = (patch: Partial<ApiTemplate>) => {
+    onCoverUpdate(patch);
+    // Also update store as fallback
+    updateTemplate(templateId, patch as Partial<Template>);
+  };
 
   const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -733,7 +806,7 @@ function CoverPanel({ templateId, locked }: { templateId: string; locked: boolea
     e.target.value = '';
   };
 
-  const currentImg = getTemplate(templateId)?.coverImageUrl;
+  const currentImg = apiTemplate?.coverImageUrl ?? getTemplate(templateId)?.coverImageUrl;
 
   return (
     <div className="space-y-5">
@@ -828,8 +901,11 @@ export function TemplateBuilder() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const template = getTemplate(id ?? '') ?? getTemplates().find(t => t.id === id);
-  const framework = template?.frameworkId ? getFramework(template.frameworkId) : undefined;
+  const [apiTemplate, setApiTemplate] = useState<ApiTemplate | null>(null);
+  const [apiFramework, setApiFramework] = useState<{ allowedQuestionTypes: QuestionType[] } | null>(null);
+  const template = apiTemplate ?? getTemplate(id ?? '') ?? getTemplates().find(t => t.id === id);
+  // Use full framework from API or store fallback (ApiTemplate.framework only has id+name)
+  const framework = apiFramework ?? (template?.frameworkId ? getFramework(template.frameworkId) : undefined);
   const effectiveQTypeLabels: Partial<Record<QuestionType, string>> = framework
     ? Object.fromEntries(
         Object.entries(ALL_Q_TYPE_LABELS).filter(([k]) =>
@@ -840,6 +916,8 @@ export function TemplateBuilder() {
 
   // ── Builder state — seed from store if previously saved, else from mockData ──
   const _meta = id ? getTemplateMeta(id) : null;
+  // True if the user has previously saved custom maturity levels on this template
+  const hasStoredLevels = !!((_meta?.maturityLevels as MaturityRow[] | undefined)?.length);
   const [name, setName] = useState(_meta?.name ?? template?.name ?? 'Untitled Template');
   const [editingName, setEditingName] = useState(false);
   const [version, setVersion] = useState(_meta?.version ?? template?.version ?? '1.0');
@@ -864,6 +942,7 @@ export function TemplateBuilder() {
   const [targetScore, setTargetScore] = useState(_meta?.targetScore ?? 70);
   const [selection, setSelection] = useState<Selection>({ kind: 'cover' });
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   // Refs always hold latest values — guards and save callbacks read these
   const isDirtyRef = useRef(false);
@@ -889,6 +968,54 @@ export function TemplateBuilder() {
 
   const locked = status === 'Active' || status === 'Archived' || user?.role !== 'admin';
 
+  // ── Load from API on mount ──
+  useEffect(() => {
+    if (!id) return;
+    templatesApi.get(id)
+      .then(tpl => {
+        setApiTemplate(tpl);
+        setName(tpl.name);
+        setVersion(tpl.version);
+        setStatus(tpl.status as TemplateStatus);
+        if (tpl.sections && tpl.sections.length > 0) {
+          const builderSections = fromApiSections(tpl.sections);
+          setSections(builderSections);
+          setExpandedSections(new Set([builderSections[0]?.id].filter(Boolean) as string[]));
+        }
+        // Load full framework (for allowedQuestionTypes + maturity level inheritance)
+        if (tpl.frameworkId) {
+          frameworksApi.get(tpl.frameworkId)
+            .then(fw => {
+              setApiFramework({ allowedQuestionTypes: fw.allowedQuestionTypes as QuestionType[] });
+              // Inherit maturity levels from framework on first open.
+              // If the admin has previously saved custom levels on this template,
+              // those are stored in _meta and we keep them unchanged.
+              if (!hasStoredLevels && fw.maturityLevels.length > 0) {
+                const ranges = computeMaturityRanges(fw.maturityLevels.length);
+                setMaturityLevels(fw.maturityLevels.map((fl, i) => ({
+                  id: uid('ml'),
+                  level: fl.level,
+                  name: fl.label,
+                  scoreFrom: ranges[i].from,
+                  scoreTo: ranges[i].to,
+                  description: fl.description,
+                })));
+              }
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => { /* keep store/default state */ });
+  }, [id]);
+
+  // ── Cover update handler ──
+  const handleCoverUpdate = useCallback((patch: Partial<ApiTemplate>) => {
+    if (id) {
+      templatesApi.update(id, patch)
+        .then(updated => setApiTemplate(updated))
+        .catch(() => {});
+    }
+  }, [id]);
 
   // ── Callbacks ──
   const toggleExpanded = useCallback((sId: string) => {
@@ -946,6 +1073,35 @@ export function TemplateBuilder() {
     markDirty();
   };
 
+  const addMaturityLevel = () => {
+    setMaturityLevels(prev => {
+      const n = prev.length + 1;
+      const ranges = computeMaturityRanges(n);
+      return prev
+        .map((l, i) => ({ ...l, scoreFrom: ranges[i].from, scoreTo: ranges[i].to }))
+        .concat({
+          id: uid('ml'),
+          level: n,
+          name: DEFAULT_LEVEL_LABELS[n - 1] ?? `Level ${n}`,
+          scoreFrom: ranges[n - 1].from,
+          scoreTo: ranges[n - 1].to,
+          description: '',
+        });
+    });
+    markDirty();
+  };
+
+  const removeMaturityLevel = (levelId: string) => {
+    setMaturityLevels(prev => {
+      if (prev.length <= 2) return prev;
+      const filtered = prev.filter(l => l.id !== levelId);
+      const n = filtered.length;
+      const ranges = computeMaturityRanges(n);
+      return filtered.map((l, i) => ({ ...l, level: i + 1, scoreFrom: ranges[i].from, scoreTo: ranges[i].to }));
+    });
+    markDirty();
+  };
+
   // Keep refs in sync with latest state on every render
   sectionsRef.current = sections;
   isDirtyRef.current = isDirty;
@@ -959,6 +1115,11 @@ export function TemplateBuilder() {
     isDirtyRef.current = true;
     setIsDirty(true);
   }, []);
+
+  // Auto-persist sections to localStorage on every change (survives HMR / page refresh)
+  useEffect(() => {
+    if (id && sections.length > 0) saveTemplateSections(id, sections);
+  }, [id, sections]);
 
   // ── CSV Import handlers ──
   const handleCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1010,8 +1171,9 @@ export function TemplateBuilder() {
   };
 
   // Stable save — reads all refs so always persists the latest values
-  const handleSaveDraft = useCallback(() => {
+  const handleSaveDraft = useCallback(async () => {
     if (id) {
+      // Store fallback (always, so HMR / page-refresh doesn't lose work)
       saveTemplateSections(id, sectionsRef.current);
       saveTemplateMeta(id, {
         name: nameRef.current,
@@ -1020,6 +1182,22 @@ export function TemplateBuilder() {
         maturityLevels: maturityLevelsRef.current,
         targetScore: targetScoreRef.current,
       });
+      // API save — awaited so callers (Preview, Activate) see persisted data
+      let apiOk = false;
+      await Promise.all([
+        templatesApi.update(id, {
+          name: nameRef.current,
+          version: versionRef.current,
+          status: statusRef.current as ApiTemplate['status'],
+        }).then(updated => setApiTemplate(updated)),
+        templatesApi.saveSections(id, toApiSections(sectionsRef.current)),
+      ]).then(() => { apiOk = true; }).catch((err: Error) => {
+        const msg = err?.message ?? 'Save failed — check the server is running';
+        console.error('[TemplateBuilder] API save failed:', msg, err);
+        setSaveError(msg);
+        setTimeout(() => setSaveError(null), 5000);
+      });
+      if (!apiOk) return; // keep isDirty=true so the user can retry
     }
     isDirtyRef.current = false;
     setIsDirty(false);
@@ -1027,7 +1205,7 @@ export function TemplateBuilder() {
     setTimeout(() => setSavedAt(null), 2000);
   }, [id]);
 
-  useDirtyState(); // keep context wired
+  const { requestNavigation } = useDirtyState();
 
   // Register synchronously on every render — module-level singleton, no effect delays
   if (!locked) {
@@ -1039,7 +1217,7 @@ export function TemplateBuilder() {
   // Clean up when this builder unmounts
   useEffect(() => () => unregisterDirtyGuard(), []);
 
-  const handleActivateConfirm = () => {
+  const handleActivateConfirm = async () => {
     const parts = version.split('.').map(Number);
     parts[parts.length - 1] = (parts[parts.length - 1] ?? 0) + 1;
     const newVersion = parts.join('.');
@@ -1048,6 +1226,7 @@ export function TemplateBuilder() {
     setActivateOpen(false);
     setIsDirty(false);
     if (id) {
+      // Store fallback
       saveTemplateSections(id, sectionsRef.current);
       saveTemplateMeta(id, {
         name: nameRef.current,
@@ -1056,14 +1235,29 @@ export function TemplateBuilder() {
         maturityLevels: maturityLevelsRef.current,
         targetScore: targetScoreRef.current,
       });
-      // Enforce single Active per family — archive any other Active sibling
+      // Enforce single Active per family in store — archive other Active siblings
       const allTemplates = getTemplates();
       getVersionFamily(allTemplates, id).forEach(t => {
         if (t.id === id || t.status !== 'Active') return;
         saveTemplate({ ...t, status: 'Archived', updatedAt: new Date().toISOString() });
         const tMeta = getTemplateMeta(t.id);
         if (tMeta) saveTemplateMeta(t.id, { ...tMeta, status: 'Archived' });
+        // Archive sibling via API
+        templatesApi.update(t.id, { status: 'Archived' }).catch(() => {});
       });
+      // API activate: await so the template list sees the saved sections immediately
+      await Promise.all([
+        templatesApi.update(id, { name: nameRef.current, version: newVersion, status: 'Active' })
+          .then(updated => setApiTemplate(updated)),
+        templatesApi.saveSections(id, toApiSections(sectionsRef.current)),
+      ]).catch(() => {});
+    }
+    // Navigate only after saves have completed
+    const categoryId = apiTemplate?.categoryId ?? template?.categoryId;
+    if (categoryId) {
+      navigate(`/categories/${categoryId}/templates`);
+    } else {
+      navigate('/categories');
     }
   };
 
@@ -1125,7 +1319,7 @@ export function TemplateBuilder() {
   // ── Right panel content ──
   const rightPanel = () => {
     if (selection.kind === 'cover') {
-      return id ? <CoverPanel templateId={id} locked={locked} /> : null;
+      return id ? <CoverPanel templateId={id} apiTemplate={apiTemplate} onCoverUpdate={handleCoverUpdate} locked={locked} /> : null;
     }
     if (selection.kind === 'scoring') {
       return (
@@ -1138,6 +1332,8 @@ export function TemplateBuilder() {
             markDirty();
           }}
           onChangeTarget={v => { setTargetScore(v); markDirty(); }}
+          onAddLevel={addMaturityLevel}
+          onRemoveLevel={removeMaturityLevel}
         />
       );
     }
@@ -1186,7 +1382,10 @@ export function TemplateBuilder() {
           {/* ── Top bar ── */}
           <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-5 gap-4">
             <div className="flex items-center gap-3 min-w-0">
-              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => { if (window.history.length > 1) window.history.back(); else navigate('/templates'); }}>
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => {
+                const categoryId = apiTemplate?.categoryId ?? template?.categoryId;
+                requestNavigation(categoryId ? `/categories/${categoryId}/templates` : '/categories');
+              }}>
                 <ArrowLeft size={15} />
               </Button>
 
@@ -1226,11 +1425,14 @@ export function TemplateBuilder() {
                 </div>
               )}
 
-              {savedAt && (
+              {savedAt && !saveError && (
                 <span className="text-[11px] text-emerald-600 font-medium hidden sm:inline">Saved</span>
               )}
-              {isDirty && !savedAt && (
+              {isDirty && !savedAt && !saveError && (
                 <span className="text-[11px] text-amber-600 font-medium hidden sm:inline">Unsaved changes</span>
+              )}
+              {saveError && (
+                <span className="text-[11px] text-red-600 font-medium hidden sm:inline" title={saveError}>⚠ Save failed</span>
               )}
 
               {!locked && (
@@ -1399,10 +1601,18 @@ export function TemplateBuilder() {
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-            <Button asChild>
-              <a href={`/questionnaire/${id}?mode=preview`} target="_blank" rel="noreferrer">
-                Open Preview
-              </a>
+            <Button
+              onClick={async () => {
+                // Save to local store + fire API sync before opening preview
+                await handleSaveDraft();
+                setPreviewOpen(false);
+                window.open(
+                  `${import.meta.env.BASE_URL}templates/${id}/preview?mode=preview`,
+                  '_blank',
+                );
+              }}
+            >
+              Open Preview
             </Button>
           </DialogFooter>
         </DialogContent>

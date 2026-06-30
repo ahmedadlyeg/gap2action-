@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { categories, events as seedEvents } from '@/services/mockData';
-import { getTemplates, getEvents } from '@/services/store';
+import { useState, useEffect } from 'react';
+import { categories } from '@/services/mockData';
+import { categoriesApi, templatesApi, eventsApi, type ApiTemplate, type ApiEvent } from '@/services/api';
 import { resultsByEventId, type SectionResult } from '@/services/resultsMockData';
 import { getMaturityMeta, type MaturityMeta } from '@/utils/maturityUtils';
 
@@ -42,17 +42,14 @@ export interface OrgMaturity {
   belowTarget: number;
 }
 
-export function useMaturityData(): OrgMaturity {
-  return useMemo(() => {
-    const templates = getTemplates();
-    const storeEvents = getEvents();
-    // Merge seed + store events, de-dupe by id (store wins)
-    const storeEventIds = new Set(storeEvents.map(e => e.id));
-    const allEvents = [
-      ...seedEvents.filter(e => !storeEventIds.has(e.id)),
-      ...storeEvents,
-    ];
+const EMPTY_ORG: OrgMaturity = {
+  avgScore: null, avgTarget: null,
+  maturityMeta: getMaturityMeta(null),
+  categories: [], totalTemplates: 0, assessedTemplates: 0, aboveTarget: 0, belowTarget: 0,
+};
 
+function computeOrgMaturity(templates: ApiTemplate[], allEvents: ApiEvent[], apiCategories?: { id: string; name: string; color: string }[]): OrgMaturity {
+  const catList = apiCategories && apiCategories.length > 0 ? apiCategories : categories;
     // Build TemplateMaturity for each template
     const templateMaturityList: TemplateMaturity[] = templates.map(tpl => {
       // Events for this template that have result data
@@ -93,7 +90,7 @@ export function useMaturityData(): OrgMaturity {
     });
 
     // Group by category
-    const categoryMaturityList: CategoryMaturity[] = categories.map(cat => {
+    const categoryMaturityList: CategoryMaturity[] = catList.map(cat => {
       const catTemplates = templateMaturityList.filter(t => t.categoryId === cat.id);
       const assessed = catTemplates.filter(t => t.currentScore !== null);
 
@@ -148,5 +145,16 @@ export function useMaturityData(): OrgMaturity {
       aboveTarget,
       belowTarget,
     };
+}
+
+export function useMaturityData(): OrgMaturity {
+  const [data, setData] = useState<OrgMaturity>(EMPTY_ORG);
+
+  useEffect(() => {
+    Promise.all([templatesApi.list(), eventsApi.list(), categoriesApi.list()])
+      .then(([templates, events, cats]) => setData(computeOrgMaturity(templates, events, cats)))
+      .catch(() => {});
   }, []);
+
+  return data;
 }
